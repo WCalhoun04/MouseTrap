@@ -1,0 +1,31 @@
+.wallet-adapter-modal-wrapper {
+  background: #1c1916;
+  border: 1px solid #3a342c;
+  border-radius: 18px;
+  font-family: var(--font-sans), "IBM Plex Sans", sans-serif;
+}
+
+.wallet-adapter-modal-title {
+  color: #f3eee6;
+  font-family: var(--font-serif), Georgia, serif;
+  font-weight: 400;
+}
+
+.wallet-adapter-modal-button-close {
+  background: #26211c;
+}
+
+.wallet-adapter-modal-list .wallet-adapter-button:hover,
+.wallet-adapter-button:not([disabled]):hover {
+  background: #26211c;
+}
+
+.wallet-adapter-modal-middle-button,
+.wallet-adapter-button-trigger {
+  background: #e4b15c;
+  color: #2a1d0c;
+}
+
+.wallet-adapter-modal-list-more {
+  color: #b7ab9c;
+}

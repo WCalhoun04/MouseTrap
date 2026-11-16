@@ -1,0 +1,556 @@
+"use client";
+
+import { useWalletModal } from "@solana/wallet-adapter-react-ui";
+import Link from "next/link";
+import { useState, type FormEvent } from "react";
+import { useIdentity, useLedger } from "@/components/providers";
+import { ShareChart } from "@/components/share-chart";
+import {
+  formatAge,
+  formatPct,
+  formatShares,
+  formatUsd,
+  formatWallet,
+  formatWhen,
+  parseUsdInput,
+} from "@/lib/format";
+import {
+  accountYield,
+  drawStatus,
+  getUser,
+  planWithdraw,
+  priceSeries,
+  readings,
+  sharePrice,
+  trailingReturn,
+  type ActivityKind,
+  type UserAccount,
+} from "@/lib/ledger";
+
+export function VaultScreen() {
+  const identity = useIdentity();
+  const ledgerApi = useLedger();
+
+  if (!identity.ready || !ledgerApi.ready) {
+    return <p className="px-4 py-16 text-sm text-muted sm:px-6">Loading the vault…</p>;
+  }
+
+  const { ledger, now } = ledgerApi;
+  const view = readings(ledger.vault, now);
+  const status = drawStatus(ledger.vault);
+  const series = priceSeries(now, 90);
+  const month = trailingReturn(now, view.price, 30);
+  const user = identity.walletId ? getUser(ledger, identity.walletId) : null;
+  const yieldView = user ? accountYield(user, view.price) : null;
+  const statusLabel =
+    status === "open" ? "Draws open" : status === "blocked" ? "Draws blocked" : "Full recall";
+
+  return (
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-6 sm:px-6 sm:py-8">
+      <p className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] tracking-[0.14em] text-faint uppercase">
+        <span>Epoch {view.epoch}</span>
+        <span className="text-line">/</span>
+        <span>Share price {formatUsd(view.price, 4)}</span>
+        <span className="text-line">/</span>
+        <span className={status === "open" ? "text-sage" : "text-danger"}>{statusLabel}</span>
+        <span className="text-line">/</span>
+        <span>NAV {formatAge(view.navAt, now)}</span>
+        <Link href="/health" className="text-brass normal-case tracking-normal hover:underline">
+          View health
+        </Link>
+      </p>
+
+      <section className="rounded-2xl border border-line bg-sheet p-5 sm:p-6">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h1 className="font-mono text-[11px] tracking-[0.16em] text-faint uppercase">
+              Your yield
+            </h1>
+            <p
+              className={`mt-2 font-serif text-5xl italic tabular-nums sm:text-6xl ${
+                yieldView && yieldView.total > 0
+                  ? "text-sage"
+                  : yieldView && yieldView.total < 0
+                    ? "text-danger"
+                    : "text-paper"
+              }`}
+            >
+              {yieldView ? formatUsd(yieldView.total) : "—"}
+            </p>
+            <p className="mt-2 max-w-xl text-sm leading-6 text-muted">
+              {yieldCopy(identity.walletId, user, yieldView)}
+            </p>
+          </div>
+          {identity.walletId && user && user.lifetimeDeposited === 0 && (
+            <button
+              type="button"
+              onClick={() => ledgerApi.loadSample(identity.walletId as string)}
+              className="rounded-full border border-line px-4 py-2 text-sm text-paper hover:bg-sheet-2"
+            >
+              Load a 30-day sample
+            </button>
+          )}
+        </div>
+        {yieldView && (
+          <ul className="mt-6 grid grid-cols-3 gap-3 border-t border-line pt-4">
+            <Split label="Rebates" value={yieldView.rebates} />
+            <Split label="Rewards" value={yieldView.rewards} />
+            <Split label="Spread" value={yieldView.spread} />
+          </ul>
+        )}
+        {yieldView && (
+          <p className="mt-4 text-sm leading-6 text-faint">
+            Positive yield is booked {Math.round(0.78 * 100)}% rebates, {Math.round(0.27 * 100)}%
+            liquidity rewards, and a 5% spread drag. A loss is booked entirely as spread. Live
+            books will come from the bot&apos;s fill log.
+          </p>
+        )}
+      </section>
+
+      <div className="grid gap-4 lg:grid-cols-5">
+        <section className="rounded-2xl border border-line bg-sheet p-5 sm:p-6 lg:col-span-3">
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="font-mono text-[11px] tracking-[0.16em] text-faint uppercase">
+                Share price
+              </h2>
+              <p className="mt-2 font-serif text-4xl tabular-nums">{formatUsd(view.price, 4)}</p>
+            </div>
+            <p className={`font-mono text-sm ${month >= 0 ? "text-sage" : "text-danger"}`}>
+              {formatPct(month)} / 30 days
+            </p>
+          </div>
+          <ShareChart points={series} livePrice={view.price} />
+        </section>
+        <TradePanel />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <PositionCard />
+        <ActivityCard />
+      </div>
+    </div>
+  );
+}
+
+function Split({ label, value }: { label: string; value: number }) {
+  return (
+    <li>
+      <p className="font-mono text-[11px] tracking-[0.16em] text-faint uppercase">{label}</p>
+      <p className={`mt-1 font-mono text-lg tabular-nums ${value < 0 ? "text-danger" : "text-paper"}`}>
+        {formatUsd(value)}
+      </p>
+    </li>
+  );
+}
+
+function yieldCopy(
+  walletId: string | null,
+  user: UserAccount | null,
+  yieldView: { total: number; pct: number } | null,
+): string {
+  if (!walletId) return "Connect a wallet to see the yield on your shares.";
+  if (!user || user.lifetimeDeposited === 0) {
+    return "No position yet. A deposit starts you at today's share price, so yield begins at zero.";
+  }
+  if (!yieldView) return "";
+  return `${formatPct(yieldView.pct)} on ${formatUsd(user.lifetimeDeposited)} deposited${
+    user.depositedAt ? `, since ${formatWhen(user.depositedAt)} UTC` : ""
+  }.`;
+}
+
+function TradePanel() {
+  const identity = useIdentity();
+  const ledgerApi = useLedger();
+  const [tab, setTab] = useState<"deposit" | "withdraw">("deposit");
+
+  if (!identity.ready || !ledgerApi.ready) return null;
+  if (!identity.walletId) {
+    return (
+      <section className="flex flex-col justify-between rounded-2xl border border-line bg-sheet p-5 sm:p-6 lg:col-span-2">
+        <div>
+          <h2 className="font-serif text-2xl">Open a position</h2>
+          <p className="mt-2 text-sm leading-6 text-muted">
+            Connect Phantom or Solflare on Devnet, or use a preview wallet to try deposit,
+            yield, and withdraw in this browser.
+          </p>
+        </div>
+        <div className="mt-6 flex flex-wrap gap-2">
+          <HeaderConnect />
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-2xl border border-line bg-sheet p-5 sm:p-6 lg:col-span-2">
+      <div className="grid grid-cols-2 rounded-full border border-line p-1 text-sm">
+        <TabButton active={tab === "deposit"} onClick={() => setTab("deposit")}>
+          Deposit
+        </TabButton>
+        <TabButton active={tab === "withdraw"} onClick={() => setTab("withdraw")}>
+          Withdraw
+        </TabButton>
+      </div>
+      {tab === "deposit" ? (
+        <DepositForm key={`${identity.walletId}-${ledgerApi.session}`} />
+      ) : (
+        <WithdrawForm key={`${identity.walletId}-${ledgerApi.session}`} />
+      )}
+    </section>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-full px-3 py-2 ${active ? "bg-paper text-ink" : "text-muted hover:text-paper"}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function HeaderConnect() {
+  const { setVisible } = useWalletModal();
+  const { enablePreview, preview } = useIdentity();
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setVisible(true)}
+        className="rounded-full bg-paper px-4 py-2 text-sm font-medium text-ink"
+      >
+        Connect wallet
+      </button>
+      {!preview && (
+        <button
+          type="button"
+          onClick={enablePreview}
+          className="rounded-full border border-line px-4 py-2 text-sm text-paper"
+        >
+          Preview wallet
+        </button>
+      )}
+    </>
+  );
+}
+
+function DepositForm() {
+  const { walletId } = useIdentity();
+  const ledgerApi = useLedger();
+  const [amount, setAmount] = useState("");
+  const [checked, setChecked] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  if (!ledgerApi.ready || !walletId) return null;
+  const user = getUser(ledgerApi.ledger, walletId);
+  const price = sharePrice(ledgerApi.ledger.vault);
+  const parsed = parseUsdInput(amount);
+  const shares = parsed ? parsed / price : null;
+
+  function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (!ledgerApi.ready || !walletId || !user) return;
+    const usdc = parseUsdInput(amount);
+    if (usdc === null) {
+      setError("Enter a USDC amount.");
+      setNotice(null);
+      return;
+    }
+    const result = ledgerApi.deposit(walletId, usdc, checked || user.acceptedRisk);
+    if (!result.ok) {
+      setError(result.error);
+      setNotice(null);
+      return;
+    }
+    setError(null);
+    setNotice(`Deposited ${formatUsd(usdc)}.`);
+    setAmount("");
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="mt-5 flex flex-col gap-4" noValidate>
+      <div className="flex items-baseline justify-between gap-3">
+        <label htmlFor="deposit-amount" className="text-sm text-muted">
+          Amount
+        </label>
+        <button
+          type="button"
+          onClick={() => setAmount(user.cash.toFixed(2))}
+          className="font-mono text-xs text-brass hover:underline"
+        >
+          {formatUsd(user.cash)} available
+        </button>
+      </div>
+      <AmountField id="deposit-amount" value={amount} onChange={setAmount} />
+      <p className="text-sm text-muted">
+        {shares
+          ? `You receive ${formatShares(shares)} at ${formatUsd(price, 4)} per share.`
+          : `Share price ${formatUsd(price, 4)}.`}
+      </p>
+      {!user.acceptedRisk && (
+        <div className="rounded-xl border border-line bg-ink p-4">
+          <p className="text-sm font-medium text-paper">Before you deposit</p>
+          <ul className="mt-2 list-disc space-y-1 pl-4 text-sm leading-6 text-muted">
+            <li>This deposit stays in the preview ledger. A live deposit sends USDC into escrow.</li>
+            <li>Drawn funds sit on the operator&apos;s Gemini account. Contracts can settle at $0 or $1.</li>
+            <li>The operator bond takes losses first. It is not insurance.</li>
+            <li>A withdrawal above the idle buffer waits for the operator to repay.</li>
+          </ul>
+          <label className="mt-3 flex items-start gap-3 text-sm leading-6 text-paper">
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={(event) => setChecked(event.target.checked)}
+              className="mt-1 accent-[#e4b15c]"
+            />
+            <span>I understand a live vault can lose money, and that this deposit stays in the preview.</span>
+          </label>
+        </div>
+      )}
+      {error && (
+        <p role="alert" className="text-sm text-danger">
+          {error}
+        </p>
+      )}
+      {notice && <p className="text-sm text-sage">{notice}</p>}
+      <button
+        type="submit"
+        className="rounded-full bg-brass px-4 py-3 text-sm font-medium text-brass-ink hover:bg-[#f0c56e]"
+      >
+        Deposit
+      </button>
+    </form>
+  );
+}
+
+function WithdrawForm() {
+  const { walletId } = useIdentity();
+  const ledgerApi = useLedger();
+  const [amount, setAmount] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  if (!ledgerApi.ready || !walletId) return null;
+  const user = getUser(ledgerApi.ledger, walletId);
+  const price = sharePrice(ledgerApi.ledger.vault);
+  const available = user.shares * price;
+  const parsed = parseUsdInput(amount);
+  const quote =
+    parsed === null ? null : planWithdraw(ledgerApi.ledger, walletId, parsed);
+  const queued = user.withdrawals.some((item) => item.settlement === "queued");
+
+  function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (!ledgerApi.ready || !walletId) return;
+    const usdc = parseUsdInput(amount);
+    if (usdc === null) {
+      setError("Enter a USDC amount.");
+      setNotice(null);
+      return;
+    }
+    const result = ledgerApi.requestWithdraw(walletId, usdc);
+    if (!result.ok) {
+      setError(result.error);
+      setNotice(null);
+      return;
+    }
+    setError(null);
+    setNotice("Withdrawal requested. Claim it below.");
+    setAmount("");
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="mt-5 flex flex-col gap-4" noValidate>
+      <div className="flex items-baseline justify-between gap-3">
+        <label htmlFor="withdraw-amount" className="text-sm text-muted">
+          Amount
+        </label>
+        <button
+          type="button"
+          onClick={() => setAmount(Math.max(0, Math.floor(available * 100) / 100).toFixed(2))}
+          className="font-mono text-xs text-brass hover:underline"
+        >
+          {formatUsd(available)} available
+        </button>
+      </div>
+      <AmountField id="withdraw-amount" value={amount} onChange={setAmount} />
+      {quote && quote.ok && (
+        <p className="text-sm leading-6 text-muted">
+          {quote.settlement === "instant"
+            ? `${formatUsd(quote.payout)} can be claimed from the idle buffer.`
+            : `${formatUsd(quote.payout)} is above the idle room of ${formatUsd(quote.instantRoom)}. On the live vault this waits for a recall. In this preview you can still claim it.`}
+        </p>
+      )}
+      {quote && !quote.ok && <p className="text-sm text-danger">{quote.error}</p>}
+      {error && (
+        <p role="alert" className="text-sm text-danger">
+          {error}
+        </p>
+      )}
+      {notice && <p className="text-sm text-sage">{notice}</p>}
+      <button
+        type="submit"
+        className="rounded-full border border-paper px-4 py-3 text-sm font-medium text-paper hover:bg-paper hover:text-ink"
+      >
+        Request withdrawal
+      </button>
+      {user.withdrawals.length > 0 && (
+        <ul className="border-t border-line">
+          {user.withdrawals.map((withdrawal) => {
+            const payout = withdrawal.shares * price;
+            return (
+              <li
+                key={withdrawal.id}
+                className="flex flex-wrap items-center justify-between gap-3 border-b border-line py-3"
+              >
+                <div>
+                  <p className="font-mono tabular-nums">{formatUsd(payout)}</p>
+                  <p className="text-xs text-faint">
+                    {withdrawal.settlement === "instant" ? "Idle buffer" : "Awaiting recall"} ·{" "}
+                    {formatWhen(withdrawal.requestedAt)} UTC
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!ledgerApi.ready || !walletId) return;
+                    const result = ledgerApi.claim(walletId, withdrawal.id);
+                    if (!result.ok) {
+                      setError(result.error);
+                      setNotice(null);
+                      return;
+                    }
+                    setError(null);
+                    setNotice(`Claimed ${formatUsd(payout)} into preview USDC.`);
+                  }}
+                  className="rounded-full bg-brass px-4 py-2 text-sm font-medium text-brass-ink hover:bg-[#f0c56e]"
+                >
+                  Claim
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {queued && (
+        <p className="text-xs leading-5 text-faint">
+          Recall claims pay immediately in this preview. On the live vault they wait for the
+          operator to return USDC, with a 48-hour deadline in the design.
+        </p>
+      )}
+    </form>
+  );
+}
+
+function AmountField({
+  id,
+  value,
+  onChange,
+}: {
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="relative">
+      <input
+        id={id}
+        inputMode="decimal"
+        autoComplete="off"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="0.00"
+        className="w-full rounded-xl border border-line bg-ink px-3 py-3 pr-16 font-mono text-lg text-paper outline-none placeholder:text-faint focus:border-brass"
+      />
+      <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 font-mono text-xs text-faint">
+        USDC
+      </span>
+    </div>
+  );
+}
+
+function PositionCard() {
+  const { walletId } = useIdentity();
+  const ledgerApi = useLedger();
+  if (!ledgerApi.ready) return null;
+  const user = walletId ? getUser(ledgerApi.ledger, walletId) : null;
+  const price = sharePrice(ledgerApi.ledger.vault);
+  const pending = user ? user.withdrawals.reduce((sum, item) => sum + item.shares, 0) : 0;
+  const openValue = user ? user.shares * price : 0;
+  const queuedValue = pending * price;
+
+  return (
+    <section className="rounded-2xl border border-line bg-sheet p-5 sm:p-6">
+      <h2 className="font-mono text-[11px] tracking-[0.16em] text-faint uppercase">Position</h2>
+      {!walletId || !user ? (
+        <p className="mt-3 text-sm text-muted">Connect a wallet to see shares and preview USDC.</p>
+      ) : (
+        <dl className="mt-4 grid grid-cols-2 gap-4">
+          <Stat label="Preview USDC" value={formatUsd(user.cash)} />
+          <Stat label="Position" value={formatUsd(openValue + queuedValue)} />
+          <Stat label="Available" value={formatShares(user.shares)} />
+          <Stat label="Queued" value={formatUsd(queuedValue)} />
+        </dl>
+      )}
+      {walletId && (
+        <p className="mt-4 font-mono text-xs text-faint">{formatWallet(walletId)}</p>
+      )}
+    </section>
+  );
+}
+
+function ActivityCard() {
+  const { walletId } = useIdentity();
+  const ledgerApi = useLedger();
+  if (!ledgerApi.ready) return null;
+  const activity = walletId ? getUser(ledgerApi.ledger, walletId).activity : [];
+
+  return (
+    <section className="rounded-2xl border border-line bg-sheet p-5 sm:p-6">
+      <h2 className="font-mono text-[11px] tracking-[0.16em] text-faint uppercase">Activity</h2>
+      {activity.length === 0 ? (
+        <p className="mt-3 text-sm text-muted">Deposits and withdrawals will show up here.</p>
+      ) : (
+        <ul className="mt-3 divide-y divide-line">
+          {activity.map((item) => (
+            <li key={item.id} className="flex items-baseline justify-between gap-3 py-3">
+              <div>
+                <p className="text-sm">{activityLabel(item.kind)}</p>
+                <p className="text-xs text-faint">{formatWhen(item.at)} UTC</p>
+              </div>
+              <p className="font-mono text-sm tabular-nums">{formatUsd(item.usdc)}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-xs text-faint">{label}</dt>
+      <dd className="mt-1 font-mono text-sm tabular-nums text-paper">{value}</dd>
+    </div>
+  );
+}
+
+function activityLabel(kind: ActivityKind): string {
+  if (kind === "deposit") return "Deposited";
+  if (kind === "request") return "Withdrawal requested";
+  return "Claimed";
+}

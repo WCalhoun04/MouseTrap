@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--font-plex), "IBM Plex Sans", sans-serif;
+  --font-serif: var(--font-instrument), Georgia, "Times New Roman", serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+  --color-ink: #12100e;
+  --color-sheet: #1c1916;
+  --color-sheet-2: #26211c;
+  --color-paper: #f3eee6;
+  --color-muted: #b7ab9c;
+  --color-faint: #8d8274;
+  --color-brass: #e4b15c;
+  --color-brass-ink: #2a1d0c;
+  --color-sage: #d5e2c4;
+  --color-danger: #ffb4a4;
+  --color-line: #3a342c;
+}
+
+body {
+  background: var(--color-ink);
+  color: var(--color-paper);
+  font-family: var(--font-sans);
+}
+
+::selection {
+  background: #e4b15c;
+  color: #2a1d0c;
+}
