@@ -2,7 +2,7 @@
 
 The market maker and draw relayer from [AGENTS.md](../AGENTS.md) sections 5 and 6. It quotes tight two-sided markets on Gemini Predictions to earn maker rebates, and draws its capital from the escrow vault through the draw gate.
 
-The escrow program does not exist yet, so the bot runs against a simulated vault that implements the same instructions and the same eight gate conditions.
+The escrow program is in [`../escrow`](../escrow) but the bot is not connected to it yet. For now the bot runs against a simulated vault that implements the same instructions and the same eight gate conditions.
 
 ## Run it
 
@@ -85,4 +85,4 @@ src/
   server/http.ts         local API for the web app
 ```
 
-When the Anchor program exists, write a `VaultClient` for it (`src/vault/types.ts`) and pass it in `cli.ts` in place of the simulated vault. Nothing else in the bot depends on which one it has.
+To use the on-chain program, write a `VaultClient` for it (`src/vault/types.ts`) from the IDL that `anchor build` writes to `escrow/target/idl/`, and pass it in `cli.ts` in place of the simulated vault. Nothing else in the bot depends on which one it has.

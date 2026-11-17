@@ -24,9 +24,10 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MouseTrap",
+  title: "Mouse Trap",
   description:
     "Deposit into the maker-rebate vault, see your yield, and withdraw mvUSDC.",
+  icons: { icon: "/logo-mark.png" },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -2,6 +2,7 @@
 
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
@@ -34,9 +35,16 @@ function Header() {
   return (
     <header className="sticky top-0 z-20 border-b border-line bg-ink/90 backdrop-blur">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3 sm:px-6">
-        <Link href="/" className="flex items-center gap-2 text-paper">
-          <Mark className="h-7 w-7 text-brass" />
-          <span className="font-serif text-xl tracking-tight">MouseTrap</span>
+        <Link href="/" className="flex shrink-0 items-center gap-2.5 text-paper">
+          <Image
+            src="/logo-mark.png"
+            alt=""
+            width={512}
+            height={512}
+            priority
+            className="h-10 w-10 object-contain"
+          />
+          <span className="font-serif text-xl tracking-tight">Mouse Trap</span>
         </Link>
         <nav className="flex items-center gap-1 text-sm">
           <NavLink href="/" active={pathname === "/"}>
@@ -153,26 +161,5 @@ function WalletControl() {
         {connecting ? "Connecting…" : "Connect wallet"}
       </button>
     </div>
-  );
-}
-
-function Mark({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 28 28" className={className} aria-hidden="true">
-      <rect
-        x="1.5"
-        y="1.5"
-        width="25"
-        height="25"
-        rx="5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-      <path
-        d="M8 20V8.5h2.6l3.4 6.4 3.4-6.4H20V20h-2.2v-6.6L14.6 19h-1.2l-3.2-5.6V20H8z"
-        fill="currentColor"
-      />
-    </svg>
   );
 }

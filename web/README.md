@@ -7,4 +7,4 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000. Deposits and withdrawals move preview USDC stored in the browser. Wallet tokens stay put until the escrow program is deployed.
+Open http://localhost:3000. Deposits and withdrawals move preview USDC stored in the browser. Wallet tokens stay put: the app is not connected to the [escrow program](../escrow) yet.
