@@ -1,14 +1,20 @@
 "use client";
 
 import { useId } from "react";
-import { formatDate, formatUsd } from "@/lib/format";
+import { formatClock, formatDate, formatUsd } from "@/lib/format";
 
 export function ShareChart({
   points,
   livePrice,
+  span = "over 90 days",
+  clock = false,
 }: {
   points: { t: number; price: number }[];
   livePrice: number;
+  /** How the period reads in the chart's accessible label. */
+  span?: string;
+  /** Label the ends with times of day, for a series that covers minutes, not months. */
+  clock?: boolean;
 }) {
   const gradientId = useId().replace(/:/g, "");
   const data = points.map((point, index) =>
@@ -43,7 +49,7 @@ export function ShareChart({
         viewBox={`0 0 ${width} ${height}`}
         className="h-auto w-full"
         role="img"
-        aria-label={`Share price over 90 days, from ${formatUsd(first.price, 4)} to ${formatUsd(last.price, 4)}`}
+        aria-label={`Share price ${span}, from ${formatUsd(first.price, 4)} to ${formatUsd(last.price, 4)}`}
       >
         <defs>
           <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
@@ -55,8 +61,8 @@ export function ShareChart({
         <path d={line} fill="none" stroke="#e4b15c" strokeWidth="2" />
       </svg>
       <figcaption className="mt-2 flex justify-between font-mono text-[11px] text-faint">
-        <span>{formatDate(first.t)}</span>
-        <span>{formatDate(last.t)}</span>
+        <span>{clock ? formatClock(first.t) : formatDate(first.t)}</span>
+        <span>{clock ? formatClock(last.t) : formatDate(last.t)}</span>
       </figcaption>
     </figure>
   );

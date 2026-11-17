@@ -16,10 +16,13 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useState,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
+import { asLedgerResult, botActions, fetchState, type BotState } from "@/lib/bot-api";
 import {
   claim,
   deposit,
@@ -99,11 +102,14 @@ type LedgerValue =
       ledger: Ledger;
       now: number;
       session: number;
-      deposit: (walletId: string, amount: number, acceptRisk: boolean) => LedgerResult;
-      requestWithdraw: (walletId: string, amount: number) => LedgerResult;
-      claim: (walletId: string, withdrawalId: string) => LedgerResult;
+      /** "bot" when the market maker bot's test mode is running, else the browser ledger. */
+      source: "bot" | "local";
+      bot: BotState | null;
+      deposit: (walletId: string, amount: number, acceptRisk: boolean) => Promise<LedgerResult>;
+      requestWithdraw: (walletId: string, amount: number) => Promise<LedgerResult>;
+      claim: (walletId: string, withdrawalId: string) => Promise<LedgerResult>;
       loadSample: (walletId: string) => LedgerResult;
-      reset: () => void;
+      reset: () => Promise<void>;
     };
 
 const IdentityContext = createContext<IdentityValue | null>(null);
@@ -154,8 +160,46 @@ function IdentityProvider({ children }: { children: ReactNode }) {
   return <IdentityContext.Provider value={value}>{children}</IdentityContext.Provider>;
 }
 
+const BOT_POLL_MS = 1_000;
+
+/** Poll the bot's test-mode API. Null while it is not running. */
+function useBotState(walletId: string | null): { bot: BotState | null; refresh: () => Promise<void> } {
+  const [bot, setBot] = useState<BotState | null>(null);
+
+  const refresh = useCallback(async () => {
+    setBot(await fetchState(walletId));
+  }, [walletId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let misses = 0;
+    const poll = async () => {
+      const next = await fetchState(walletId);
+      if (cancelled) return;
+      // One dropped poll should not flip the whole app back to the local ledger.
+      if (next) {
+        misses = 0;
+        setBot(next);
+      } else if ((misses += 1) >= 3) {
+        setBot(null);
+      }
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), BOT_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [walletId]);
+
+  return { bot, refresh };
+}
+
 function LedgerProvider({ children }: { children: ReactNode }) {
   const book = useSyncExternalStore(subscribeBook, currentBook, () => SERVER_BOOK);
+  const identity = useContext(IdentityContext);
+  const { bot, refresh } = useBotState(identity?.walletId ?? null);
+  const [botSession, setBotSession] = useState(0);
 
   const commit = useCallback((next: Ledger, session?: number) => {
     const prev = currentBook();
@@ -167,23 +211,52 @@ function LedgerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<LedgerValue>(() => {
+    if (bot) {
+      // The bot's simulated escrow is the source of truth; the browser only displays it.
+      const run = async (action: ReturnType<typeof botActions.deposit>) => {
+        const result = await action;
+        await refresh();
+        return asLedgerResult(result, bot.ledger);
+      };
+      return {
+        ready: true,
+        ledger: bot.ledger,
+        now: bot.now,
+        session: botSession,
+        source: "bot",
+        bot,
+        deposit: (walletId, amount, acceptRisk) =>
+          run(botActions.deposit(walletId, amount, acceptRisk)),
+        requestWithdraw: (walletId, amount) => run(botActions.requestWithdraw(walletId, amount)),
+        claim: (walletId, withdrawalId) => run(botActions.claim(walletId, withdrawalId)),
+        loadSample: () => ({ ok: false, error: "Samples only load in the browser preview." }),
+        reset: async () => {
+          await botActions.reset();
+          await refresh();
+          setBotSession((n) => n + 1);
+        },
+      };
+    }
+
     const { ledger, now, session } = book;
     return {
       ready: true,
       ledger,
       now,
       session,
-      deposit: (walletId, amount, acceptRisk) => {
+      source: "local",
+      bot: null,
+      deposit: async (walletId, amount, acceptRisk) => {
         const result = deposit(ledger, walletId, amount, Date.now(), acceptRisk);
         if (result.ok) commit(result.ledger);
         return result;
       },
-      requestWithdraw: (walletId, amount) => {
+      requestWithdraw: async (walletId, amount) => {
         const result = requestWithdraw(ledger, walletId, amount, Date.now());
         if (result.ok) commit(result.ledger);
         return result;
       },
-      claim: (walletId, withdrawalId) => {
+      claim: async (walletId, withdrawalId) => {
         const result = claim(ledger, walletId, withdrawalId, Date.now());
         if (result.ok) commit(result.ledger);
         return result;
@@ -193,9 +266,9 @@ function LedgerProvider({ children }: { children: ReactNode }) {
         if (result.ok) commit(result.ledger);
         return result;
       },
-      reset: () => commit(seedLedger(Date.now()), book.session + 1),
+      reset: async () => commit(seedLedger(Date.now()), book.session + 1),
     };
-  }, [book, commit]);
+  }, [book, bot, botSession, commit, refresh]);
 
   return <LedgerContext.Provider value={value}>{children}</LedgerContext.Provider>;
 }

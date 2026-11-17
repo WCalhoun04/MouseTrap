@@ -50,7 +50,10 @@ export function formatWhen(time: number | string): string {
 }
 
 export function formatAge(from: number, now: number): string {
-  const minutes = Math.max(1, Math.round((now - from) / 60_000));
+  const seconds = Math.max(0, Math.round((now - from) / 1000));
+  if (seconds < 60) return seconds === 1 ? "1 second ago" : `${seconds} seconds ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes === 1) return "1 minute ago";
   if (minutes < 60) return `${minutes} minutes ago`;
   const hours = Math.round(minutes / 60);
   return hours === 1 ? "1 hour ago" : `${hours} hours ago`;
@@ -68,4 +71,17 @@ export function parseUsdInput(raw: string): number | null {
   const value = Number(cleaned);
   if (!Number.isFinite(value) || value <= 0) return null;
   return Math.round(value * 100) / 100;
+}
+
+export function formatClock(time: number | string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(new Date(time));
+}
+
+/** A contract price in cents, shown in dollars. */
+export function formatCents(cents: number | null): string {
+  return cents === null ? "—" : `$${(cents / 100).toFixed(2)}`;
 }

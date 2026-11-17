@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MouseTrap market maker</title>
+<style>
+  :root {
+    --ink: #12100e;
+    --sheet: #1c1916;
+    --sheet-2: #26211c;
+    --paper: #f3eee6;
+    --muted: #b7ab9c;
+    --faint: #8d8274;
+    --brass: #e4b15c;
+    --good: #d5e2c4;
+    --bad: #ffb4a4;
+    --line: #3a342c;
+    --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --serif: "Instrument Serif", Georgia, "Times New Roman", serif;
+    --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--ink); color: var(--paper); font-family: var(--sans); }
+  body { min-height: 100vh; }
+  .bar { height: 4px; background: var(--brass); }
+  .wrap { max-width: 1500px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+  h1 { font-family: var(--serif); font-weight: 400; font-size: 30px; letter-spacing: -0.01em; margin: 0; }
+  h1 span { color: var(--faint); }
+  .sub { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+
+  .label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--faint); margin: 0; font-weight: 400; }
+  .card { background: var(--sheet); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; min-width: 0; }
+
+  .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .kpis .kpi:nth-child(n + 5) .value { font-size: 24px; }
+  .foot { margin: 0; color: var(--faint); font-size: 12px; line-height: 1.6; max-width: 110ch; }
+  .kpi .value { font-family: var(--serif); font-size: 32px; line-height: 1.1; margin-top: 8px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kpi .note { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .up { color: var(--good); }
+  .down { color: var(--bad); }
+
+  .main { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 14px; }
+  .lower { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+
+  .head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+  .head .hint { font-size: 12px; color: var(--faint); }
+
+  /* order tape */
+  .tape { height: 520px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+  .tape-row { display: grid; grid-template-columns: 78px 84px 44px 110px minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 7px 0; border-top: 1px solid var(--line); font-size: 13px; }
+  .tape-row:first-child { border-top: 0; }
+  .tape-row.fresh { animation: flash 1.6s ease-out; }
+  @keyframes flash { from { background: rgba(228, 177, 92, 0.2); } to { background: transparent; } }
+  .time { font-family: var(--mono); font-size: 12px; color: var(--faint); }
+  .kind { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; white-space: nowrap; }
+  .kind.place { color: var(--brass); }
+  .kind.fill { color: var(--good); }
+  .kind.cancel { color: var(--faint); }
+  .kind.reject { color: var(--bad); }
+  .side { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; color: var(--muted); }
+  .px { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .what { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+  .what em { font-style: normal; color: var(--faint); }
+
+  /* quote board */
+  .board { display: flex; flex-direction: column; }
+  .q { padding: 10px 0; border-top: 1px solid var(--line); }
+  .q:first-child { border-top: 0; }
+  .q-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .q-title { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .q-pos { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+  .q-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; font-family: var(--mono); font-size: 11px; color: var(--faint); margin-top: 2px; }
+  .q-meta b { font-weight: 400; color: var(--paper); }
+  .strip { position: relative; height: 22px; margin-top: 6px; cursor: crosshair; }
+  .strip .track { position: absolute; left: 0; right: 0; top: 10px; height: 2px; background: var(--line); border-radius: 2px; }
+  .strip .band { position: absolute; top: 6px; height: 10px; background: rgba(228, 177, 92, 0.1); border-radius: 3px; }
+  .strip .mkt { position: absolute; top: 3px; width: 2px; height: 16px; background: var(--muted); border-radius: 1px; transform: translateX(-1px); }
+  .strip .ours { position: absolute; top: 5px; width: 12px; height: 12px; border-radius: 50%; background: var(--brass); border: 2px solid var(--sheet); transform: translateX(-6px); }
+  .strip .ours.ask { border-radius: 3px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11px; color: var(--faint); margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .legend i { display: inline-block; vertical-align: middle; margin-right: 5px; }
+  .legend .l-mkt { width: 2px; height: 12px; background: var(--muted); }
+  .legend .l-bid { width: 10px; height: 10px; border-radius: 50%; background: var(--brass); }
+  .legend .l-ask { width: 10px; height: 10px; border-radius: 3px; background: var(--brass); }
+  .legend .l-band { width: 16px; height: 8px; background: rgba(228, 177, 92, 0.25); border-radius: 2px; }
+
+  /* lists */
+  .rows { margin: 0; padding: 0; list-style: none; }
+  .rows li { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; }
+  .rows li:first-child { border-top: 0; }
+  .rows .k { color: var(--muted); min-width: 0; }
+  .rows .v { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  .log li { justify-content: flex-start; }
+  .log .t { font-family: var(--mono); font-size: 11px; color: var(--faint); flex: none; }
+
+  /* chart */
+  .chart { position: relative; margin-top: 4px; }
+  .chart svg { display: block; width: 100%; height: 150px; }
+  .chart-ends { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11px; color: var(--faint); margin-top: 4px; }
+  .big { font-family: var(--serif); font-size: 30px; font-variant-numeric: tabular-nums; }
+
+  .tip { position: fixed; z-index: 10; pointer-events: none; background: var(--sheet-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; font-family: var(--mono); font-size: 11px; line-height: 1.5; color: var(--paper); white-space: nowrap; display: none; }
+  .empty { color: var(--muted); font-size: 13px; line-height: 1.5; padding: 8px 0; }
+  .offline { border-color: rgba(255, 180, 164, 0.4); }
+
+  @media (max-width: 1100px) {
+    .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .main, .lower { grid-template-columns: minmax(0, 1fr); }
+    .tape { height: 380px; }
+  }
+  @media (max-width: 560px) {
+    .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .tape-row { grid-template-columns: 64px 70px minmax(0, 1fr); }
+    .tape-row .side, .tape-row .what { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { .tape-row.fresh { animation: none; } }
+</style>
+</head>
+<body>
+<div class="bar"></div>
+<div class="wrap">
+  <header>
+    <h1>MouseTrap <span>market maker</span></h1>
+  </header>
+  <p class="sub" id="blurb">Looking for the bot.</p>
+
+  <section class="kpis" id="kpis"></section>
+
+  <div class="main">
+    <section class="card">
+      <div class="head">
+        <h2 class="label">Order tape</h2>
+        <span class="hint" id="tape-hint"></span>
+      </div>
+      <div class="tape" id="tape" aria-live="polite"></div>
+    </section>
+
+    <section class="card">
+      <div class="head">
+        <h2 class="label">Quote board</h2>
+        <span class="hint">price from $0 to $1</span>
+      </div>
+      <div class="board" id="board"></div>
+      <div class="legend">
+        <span><i class="l-mkt"></i>Market bid and ask</span>
+        <span><i class="l-bid"></i>Our bid</span>
+        <span><i class="l-ask"></i>Our ask</span>
+        <span><i class="l-band"></i>Rebate band, $0.20 to $0.80</span>
+      </div>
+    </section>
+  </div>
+
+  <div class="lower">
+    <section class="card">
+      <div class="head">
+        <h2 class="label">Vault share price</h2>
+        <span class="hint" id="chart-change"></span>
+      </div>
+      <div class="big" id="share-price">—</div>
+      <div class="chart" id="chart"></div>
+      <div class="chart-ends"><span id="chart-from"></span><span id="chart-to"></span></div>
+      <ul class="rows" id="vault-rows" style="margin-top:8px"></ul>
+    </section>
+
+    <section class="card">
+      <div class="head">
+        <h2 class="label">Draw gate</h2>
+        <span class="hint" id="gate-hint"></span>
+      </div>
+      <ul class="rows" id="gate"></ul>
+    </section>
+
+    <section class="card">
+      <div class="head"><h2 class="label">Edge</h2></div>
+      <ul class="rows" id="edge"></ul>
+      <div class="head" style="margin-top:14px"><h2 class="label">Relayer and bot log</h2></div>
+      <ul class="rows log" id="log"></ul>
+    </section>
+  </div>
+  <p class="foot" id="foot"></p>
+</div>
+<div class="tip" id="tip"></div>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var tip = $("tip");
+  var seenEvents = null;   // ids already drawn, so only new rows flash
+  var lastHistory = [];
+
+  function esc(value) {
+    return String(value == null ? "" : value).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function usd(value, digits) {
+    if (value == null || !isFinite(value)) return "—";
+    var d = digits == null ? 2 : digits;
+    return (value < 0 ? "-$" : "$") + Math.abs(value).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+  }
+  function cents(c) { return c == null ? "—" : "$" + (c / 100).toFixed(2); }
+  function pct(v) { return v == null ? "—" : (v * 100).toFixed(2) + "%"; }
+  function markout(v) { return v == null ? "—" : (v >= 0 ? "+" : "") + v.toFixed(2) + "¢"; }
+  function clock(ms) { return new Date(ms).toLocaleTimeString("en-US", { hour12: false }); }
+  function tone(v) { return v > 0 ? "up" : v < 0 ? "down" : ""; }
+
+  function showTip(html, x, y) {
+    tip.innerHTML = html;
+    tip.style.display = "block";
+    var w = tip.offsetWidth, h = tip.offsetHeight;
+    tip.style.left = Math.min(window.innerWidth - w - 8, x + 12) + "px";
+    tip.style.top = Math.max(8, y - h - 10) + "px";
+  }
+  function hideTip() { tip.style.display = "none"; }
+
+  // ---- KPI tiles ----
+  function kpi(label, value, note, cls) {
+    return '<div class="card kpi"><p class="label">' + esc(label) + '</p>' +
+      '<div class="value ' + (cls || "") + '">' + esc(value) + '</div>' +
+      '<div class="note">' + esc(note || "") + '</div></div>';
+  }
+  function renderKpis(bot, state) {
+    var vault = state ? state.ledger.vault : null;
+    var d = bot.daily || { days: 0 };
+    var replay = bot.dayFlow;
+    var per = replay ? "day" : "epoch";
+    var days = d.days + (replay ? " simulated day" : " epoch") + (d.days === 1 ? "" : "s");
+    var pctOf = function (v) { return v == null ? "—" : (v >= 0 ? "+" : "") + (v * 100).toFixed(1) + "%"; };
+    $("kpis").innerHTML =
+      kpi("PnL per " + per, d.avgPnl == null ? "—" : usd(d.avgPnl), d.days ? "average over " + days : "first " + per + " not settled yet", tone(d.avgPnl || 0)) +
+      kpi("After the fee waiver", d.avgPnlPostWaiver == null ? "—" : usd(d.avgPnlPostWaiver), "per " + per + ", with the maker fee from Jan 1, 2027", tone(d.avgPnlPostWaiver || 0)) +
+      kpi("Staker return", pctOf(d.apy), "annualised on vault NAV · " + pctOf(d.apyPostWaiver) + " after the waiver", tone(d.apy || 0)) +
+      kpi("Rebates per " + per, d.avgRebate == null ? "—" : usd(d.avgRebate), "paid out, rounded down to the cent") +
+      kpi("Total PnL", usd(bot.pnl.total), "over " + days, tone(bot.pnl.total)) +
+      kpi("Rebates paid", usd(bot.pnl.rebate), "maker fee waived through Dec 31, 2026") +
+      kpi("Spread", usd(bot.pnl.spread), bot.pnl.adverse ? "includes " + usd(-bot.pnl.adverse) + " to informed takers" : "marked to mid", tone(bot.pnl.spread)) +
+      kpi("Fills", String(bot.edge.fills), bot.edge.contracts + " contracts, " + usd(bot.edge.filledNotional) + " · " + bot.openOrders + " orders resting");
+  }
+
+  function renderFoot(bot) {
+    var f = bot.flow;
+    $("foot").textContent = bot.dayFlow && f
+      ? "Time-compressed simulation with fake funds. Each " + f.epochSeconds + "-second epoch replays one day of each contract's real 24-hour Gemini volume against " +
+        (bot.source === "gemini" ? "live Gemini prices" : "a generated market") + ", so per-day figures approximate a real day. " +
+        "Assumed, not measured: " + Math.round(f.captureShare * 100) + "% of taker flow reaches the bot, " + Math.round(f.informedShare * 100) +
+        "% of takers are informed and cost " + f.informedMoveCents + "¢ a contract, and an event's volume is split evenly across its contracts. Rebates use Gemini's published formula. Return is on the whole vault: volume, not capital, is the limit, so more deposits would lower it. Liquidity rewards, hedging and the operator's fee are not included."
+      : "Paper trading with fake funds. Quotes fill only on real market trades.";
+  }
+
+  // ---- header ----
+  function renderHeader(bot, state) {
+    // Only shown when there is something to say: why quotes are pulled or reduced.
+    $("blurb").textContent = bot.killReason ? bot.killReason + "." : "";
+    $("blurb").hidden = !bot.killReason;
+  }
+
+  // ---- order tape ----
+  var KIND = { place: "+ PLACE", cancel: "× CANCEL", fill: "✓ FILL", reject: "! REJECT" };
+  function renderTape(bot) {
+    var events = bot.orderEvents || [];
+    var box = $("tape");
+    if (events.length === 0) {
+      box.innerHTML = '<p class="empty">No orders yet. The bot places quotes as soon as its first draw from the vault lands.</p>';
+      $("tape-hint").textContent = "";
+      return;
+    }
+    var first = seenEvents === null;
+    var seen = seenEvents || {};
+    var html = "";
+    for (var i = 0; i < events.length; i++) {
+      var e = events[i];
+      var fresh = !first && !seen[e.id];
+      var side = e.side === "bid" ? "BUY" : "SELL";
+      html += '<div class="tape-row' + (fresh ? " fresh" : "") + '">' +
+        '<span class="time">' + clock(e.at) + '</span>' +
+        '<span class="kind ' + esc(e.kind) + '">' + (KIND[e.kind] || esc(e.kind)) + '</span>' +
+        '<span class="side">' + side + '</span>' +
+        '<span class="px">' + e.qty + ' @ ' + cents(e.price) + '</span>' +
+        '<span class="what" title="' + esc(e.title) + '">' + esc(e.title) + (e.detail ? ' <em>· ' + esc(e.detail) + '</em>' : '') + '</span>' +
+        '</div>';
+    }
+    box.innerHTML = html;
+    seenEvents = {};
+    for (var j = 0; j < events.length; j++) seenEvents[events[j].id] = true;
+    $("tape-hint").textContent = "newest first · last " + events.length;
+  }
+
+  // ---- quote board ----
+  function renderBoard(bot) {
+    var box = $("board");
+    if (bot.contracts.length === 0) {
+      box.innerHTML = '<p class="empty">No contract currently has a two-sided book inside the rebate band.</p>';
+      return;
+    }
+    var html = "";
+    bot.contracts.forEach(function (c, index) {
+      var marks = '<div class="track"></div><div class="band" style="left:20%;width:60%"></div>';
+      if (c.marketBid != null) marks += '<div class="mkt" style="left:' + c.marketBid + '%"></div>';
+      if (c.marketAsk != null) marks += '<div class="mkt" style="left:' + c.marketAsk + '%"></div>';
+      if (c.ourBid) marks += '<div class="ours bid" style="left:' + c.ourBid.price + '%"></div>';
+      if (c.ourAsk) marks += '<div class="ours ask" style="left:' + c.ourAsk.price + '%"></div>';
+      var pos = c.position === 0 ? "flat" : (c.position > 0 ? "+" : "") + c.position + " YES";
+      html += '<div class="q">' +
+        '<div class="q-top"><span class="q-title" title="' + esc(c.title) + '">' + esc(c.title) + '</span>' +
+        '<span class="q-pos">' + esc(pos) + '</span></div>' +
+        '<div class="strip" data-index="' + index + '">' + marks + '</div>' +
+        '<div class="q-meta">' +
+        '<span>bid <b>' + (c.ourBid ? c.ourBid.qty + " @ " + cents(c.ourBid.price) : "—") + '</b></span>' +
+        '<span>market ' + cents(c.marketBid) + ' / ' + cents(c.marketAsk) + '</span>' +
+        '<span>ask <b>' + (c.ourAsk ? c.ourAsk.qty + " @ " + cents(c.ourAsk.price) : "—") + '</b></span>' +
+        '</div>' +
+        (c.note ? '<div class="q-meta"><span>' + esc(c.category) + ' · ' + esc(c.note) + '</span></div>' : '') +
+        '</div>';
+    });
+    box.innerHTML = html;
+    Array.prototype.forEach.call(box.querySelectorAll(".strip"), function (strip) {
+      var c = bot.contracts[Number(strip.getAttribute("data-index"))];
+      strip.addEventListener("mousemove", function (ev) {
+        showTip(
+          "Market " + cents(c.marketBid) + " / " + cents(c.marketAsk) + "<br>" +
+          "Our bid " + (c.ourBid ? c.ourBid.qty + " @ " + cents(c.ourBid.price) : "none") + "<br>" +
+          "Our ask " + (c.ourAsk ? c.ourAsk.qty + " @ " + cents(c.ourAsk.price) : "none") + "<br>" +
+          "Position " + c.position + (c.rewardEligible ? "<br>Meets liquidity-reward rules" : ""),
+          ev.clientX, ev.clientY);
+      });
+      strip.addEventListener("mouseleave", hideTip);
+    });
+  }
+
+  // ---- share price chart (one series, so the card title names it) ----
+  function renderChart(state) {
+    var points = state.history || [];
+    lastHistory = points;
+    $("share-price").textContent = usd(state.sharePrice, 5);
+    var box = $("chart");
+    if (points.length < 2) {
+      box.innerHTML = '<p class="empty">The line starts after the first NAV report.</p>';
+      return;
+    }
+    var W = 600, H = 150, padX = 2, padTop = 10, padBottom = 6;
+    var min = Infinity, max = -Infinity;
+    points.forEach(function (p) { if (p.price < min) min = p.price; if (p.price > max) max = p.price; });
+    var span = (max - min) || 0.0001;
+    var lo = min - span * 0.2, hi = max + span * 0.2;
+    var x = function (i) { return padX + (i / (points.length - 1)) * (W - 2 * padX); };
+    var y = function (v) { return padTop + (1 - (v - lo) / (hi - lo)) * (H - padTop - padBottom); };
+    var d = points.map(function (p, i) { return (i ? "L" : "M") + x(i).toFixed(1) + " " + y(p.price).toFixed(1); }).join(" ");
+    var area = d + " L" + x(points.length - 1).toFixed(1) + " " + (H - padBottom) + " L" + x(0).toFixed(1) + " " + (H - padBottom) + " Z";
+    box.innerHTML =
+      '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="Vault share price this session, from ' +
+      usd(points[0].price, 5) + ' to ' + usd(points[points.length - 1].price, 5) + '">' +
+      '<defs><linearGradient id="g" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stop-color="#e4b15c" stop-opacity="0.3"/><stop offset="100%" stop-color="#e4b15c" stop-opacity="0"/></linearGradient></defs>' +
+      '<path d="' + area + '" fill="url(#g)"/>' +
+      '<path d="' + d + '" fill="none" stroke="#e4b15c" stroke-width="2" vector-effect="non-scaling-stroke"/>' +
+      '<line id="cross" x1="0" x2="0" y1="0" y2="' + H + '" stroke="#b7ab9c" stroke-width="1" vector-effect="non-scaling-stroke" visibility="hidden"/>' +
+      '</svg>';
+    var change = points[points.length - 1].price / points[0].price - 1;
+    var el = $("chart-change");
+    el.textContent = (change >= 0 ? "+" : "") + (change * 100).toFixed(3) + "% this session";
+    el.className = "hint " + tone(change);
+    $("chart-from").textContent = clock(points[0].t);
+    $("chart-to").textContent = clock(points[points.length - 1].t);
+
+    var svg = box.querySelector("svg"), cross = box.querySelector("#cross");
+    svg.addEventListener("mousemove", function (ev) {
+      var rect = svg.getBoundingClientRect();
+      var i = Math.round(((ev.clientX - rect.left) / rect.width) * (lastHistory.length - 1));
+      i = Math.max(0, Math.min(lastHistory.length - 1, i));
+      var p = lastHistory[i];
+      var cx = padX + (i / (lastHistory.length - 1)) * (W - 2 * padX);
+      cross.setAttribute("x1", cx); cross.setAttribute("x2", cx); cross.setAttribute("visibility", "visible");
+      showTip(usd(p.price, 5) + "<br>" + clock(p.t), ev.clientX, ev.clientY);
+    });
+    svg.addEventListener("mouseleave", function () { cross.setAttribute("visibility", "hidden"); hideTip(); });
+  }
+
+  function row(k, v, cls) {
+    return '<li><span class="k">' + esc(k) + '</span><span class="v ' + (cls || "") + '">' + esc(v) + '</span></li>';
+  }
+
+  function renderVault(state) {
+    var v = state.ledger.vault;
+    var html = row("NAV", usd(v.idleUsdc + v.geminiEquity)) +
+      row("Drawn to the market maker", usd(v.drawnPrincipal)) +
+      row("Idle USDC in vault", usd(v.idleUsdc)) +
+      row("Operator bond", usd(v.bond));
+    if (state.recall) html += row("Recall outstanding", usd(Math.max(0, state.recall.amount - state.recall.repaid)), "down");
+    $("vault-rows").innerHTML = html;
+  }
+
+  function renderGate(state) {
+    var checks = state.gate.checks;
+    var failing = checks.filter(function (c) { return !c.pass; }).length;
+    var hint = $("gate-hint");
+    hint.textContent = failing === 0 ? "✓ draws open" : "✕ " + failing + " failing";
+    hint.className = "hint " + (failing === 0 ? "up" : "down");
+    $("gate").innerHTML = checks.map(function (c) {
+      return '<li title="' + esc(c.requirement) + '"><span class="k">' + esc(c.label) + '</span>' +
+        '<span class="v">' + esc(c.value) + ' <span class="' + (c.pass ? "up" : "down") + '">' + (c.pass ? "✓ pass" : "✕ fail") + '</span></span></li>';
+    }).join("");
+  }
+
+  function renderEdge(bot) {
+    $("edge").innerHTML =
+      row("Rebate per $ filled", pct(bot.edge.rebatePerDollar)) +
+      row("Net edge, fee waiver", pct(bot.edge.trailingEdge), tone(bot.edge.trailingEdge || 0)) +
+      row("Net edge, post-waiver", pct(bot.edge.trailingEdgePostWaiver), tone(bot.edge.trailingEdgePostWaiver || 0)) +
+      row("Markout at fill / 1 min / 5 min", markout(bot.markouts.atFill) + " / " + markout(bot.markouts.m1) + " / " + markout(bot.markouts.m5)) +
+      row("Draws", bot.relayer.drawsAllowed ? "allowed" : (bot.relayer.drawBlockReason || "held"));
+    var log = bot.log.slice(0, 7);
+    $("log").innerHTML = log.length
+      ? log.map(function (l) { return '<li><span class="t">' + clock(l.at) + '</span><span>' + esc(l.text) + '</span></li>'; }).join("")
+      : '<li><span class="k">Nothing logged yet.</span></li>';
+  }
+
+  function offline() {
+    $("blurb").hidden = false;
+    $("blurb").textContent = "The dashboard lost contact with the bot. It will reconnect on its own when the bot is back.";
+  }
+
+  var misses = 0;
+  function poll() {
+    Promise.all([
+      fetch("/bot", { cache: "no-store" }).then(function (r) { return r.json(); }),
+      fetch("/state", { cache: "no-store" }).then(function (r) { return r.json(); })
+    ]).then(function (res) {
+      misses = 0;
+      var bot = res[0], state = res[1];
+      renderHeader(bot, state);
+      renderKpis(bot, state);
+      renderTape(bot);
+      renderBoard(bot);
+      renderChart(state);
+      renderVault(state);
+      renderGate(state);
+      renderEdge(bot);
+      renderFoot(bot);
+    }).catch(function () {
+      if (++misses >= 3) offline();
+    });
+  }
+  poll();
+  setInterval(poll, 1000);
+})();
+</script>
+</body>
+</html>

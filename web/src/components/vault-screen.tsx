@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { useIdentity, useLedger } from "@/components/providers";
 import { ShareChart } from "@/components/share-chart";
+import { splitByBookings } from "@/lib/bot-api";
 import {
   formatAge,
   formatPct,
@@ -35,15 +36,21 @@ export function VaultScreen() {
     return <p className="px-4 py-16 text-sm text-muted sm:px-6">Loading the vault…</p>;
   }
 
-  const { ledger, now } = ledgerApi;
-  const view = readings(ledger.vault, now);
-  const status = drawStatus(ledger.vault);
-  const series = priceSeries(now, 90);
-  const month = trailingReturn(now, view.price, 30);
+  const { ledger, now, bot } = ledgerApi;
+  const local = readings(ledger.vault, now);
+  // With the bot running, epoch, NAV time and price history are the real ones.
+  const view = bot ? { ...local, epoch: bot.epoch, navAt: bot.navAt } : local;
+  const status = bot?.recall ? "recall" : bot && !bot.gate.ok ? "blocked" : drawStatus(ledger.vault);
+  const series = bot && bot.history.length > 1 ? bot.history : priceSeries(now, 90);
+  const change = bot
+    ? view.price / (bot.history[0]?.price ?? view.price) - 1
+    : trailingReturn(now, view.price, 30);
   const user = identity.walletId ? getUser(ledger, identity.walletId) : null;
-  const yieldView = user ? accountYield(user, view.price) : null;
+  const baseYield = user ? accountYield(user, view.price) : null;
+  const yieldView =
+    bot && baseYield ? { ...baseYield, ...splitByBookings(baseYield.total, bot.bookings) } : baseYield;
   const statusLabel =
-    status === "open" ? "Draws open" : status === "blocked" ? "Draws blocked" : "Full recall";
+    status === "open" ? "Draws open" : status === "blocked" ? "Draws blocked" : "Recall open";
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-6 sm:px-6 sm:py-8">
@@ -81,7 +88,7 @@ export function VaultScreen() {
               {yieldCopy(identity.walletId, user, yieldView)}
             </p>
           </div>
-          {identity.walletId && user && user.lifetimeDeposited === 0 && (
+          {!bot && identity.walletId && user && user.lifetimeDeposited === 0 && (
             <button
               type="button"
               onClick={() => ledgerApi.loadSample(identity.walletId as string)}
@@ -100,9 +107,9 @@ export function VaultScreen() {
         )}
         {yieldView && (
           <p className="mt-4 text-sm leading-6 text-faint">
-            Positive yield is booked {Math.round(0.78 * 100)}% rebates, {Math.round(0.27 * 100)}%
-            liquidity rewards, and a 5% spread drag. A loss is booked entirely as spread. Live
-            books will come from the bot&apos;s fill log.
+            {bot
+              ? "Split in the proportions the vault booked from the bot's fills: rebates paid, and spread marked to mid. Liquidity rewards cannot be earned on paper, so they show as zero."
+              : "Positive yield is booked 78% rebates, 27% liquidity rewards, and a 5% spread drag. A loss is booked entirely as spread. Start the bot in test mode to see books from its fill log."}
           </p>
         )}
       </section>
@@ -116,11 +123,16 @@ export function VaultScreen() {
               </h2>
               <p className="mt-2 font-serif text-4xl tabular-nums">{formatUsd(view.price, 4)}</p>
             </div>
-            <p className={`font-mono text-sm ${month >= 0 ? "text-sage" : "text-danger"}`}>
-              {formatPct(month)} / 30 days
+            <p className={`font-mono text-sm ${change >= 0 ? "text-sage" : "text-danger"}`}>
+              {formatPct(change)} / {bot ? "this session" : "30 days"}
             </p>
           </div>
-          <ShareChart points={series} livePrice={view.price} />
+          <ShareChart
+            points={series}
+            livePrice={view.price}
+            span={bot ? "this session" : "over 90 days"}
+            clock={Boolean(bot)}
+          />
         </section>
         <TradePanel />
       </div>
@@ -260,7 +272,7 @@ function DepositForm() {
   const parsed = parseUsdInput(amount);
   const shares = parsed ? parsed / price : null;
 
-  function onSubmit(event: FormEvent) {
+  async function onSubmit(event: FormEvent) {
     event.preventDefault();
     if (!ledgerApi.ready || !walletId || !user) return;
     const usdc = parseUsdInput(amount);
@@ -269,7 +281,7 @@ function DepositForm() {
       setNotice(null);
       return;
     }
-    const result = ledgerApi.deposit(walletId, usdc, checked || user.acceptedRisk);
+    const result = await ledgerApi.deposit(walletId, usdc, checked || user.acceptedRisk);
     if (!result.ok) {
       setError(result.error);
       setNotice(null);
@@ -348,11 +360,21 @@ function WithdrawForm() {
   const price = sharePrice(ledgerApi.ledger.vault);
   const available = user.shares * price;
   const parsed = parseUsdInput(amount);
+  const fromBot = ledgerApi.source === "bot";
+  const planned = parsed === null ? null : planWithdraw(ledgerApi.ledger, walletId, parsed);
+  // The bot's vault knows every wallet's pending claims, so its idle room is the one to trust.
+  const room = ledgerApi.bot?.instantRoom;
   const quote =
-    parsed === null ? null : planWithdraw(ledgerApi.ledger, walletId, parsed);
+    planned && planned.ok && room !== undefined
+      ? {
+          ...planned,
+          instantRoom: room,
+          settlement: planned.payout <= room ? ("instant" as const) : ("queued" as const),
+        }
+      : planned;
   const queued = user.withdrawals.some((item) => item.settlement === "queued");
 
-  function onSubmit(event: FormEvent) {
+  async function onSubmit(event: FormEvent) {
     event.preventDefault();
     if (!ledgerApi.ready || !walletId) return;
     const usdc = parseUsdInput(amount);
@@ -361,7 +383,7 @@ function WithdrawForm() {
       setNotice(null);
       return;
     }
-    const result = ledgerApi.requestWithdraw(walletId, usdc);
+    const result = await ledgerApi.requestWithdraw(walletId, usdc);
     if (!result.ok) {
       setError(result.error);
       setNotice(null);
@@ -391,7 +413,9 @@ function WithdrawForm() {
         <p className="text-sm leading-6 text-muted">
           {quote.settlement === "instant"
             ? `${formatUsd(quote.payout)} can be claimed from the idle buffer.`
-            : `${formatUsd(quote.payout)} is above the idle room of ${formatUsd(quote.instantRoom)}. On the live vault this waits for a recall. In this preview you can still claim it.`}
+            : fromBot
+              ? `${formatUsd(quote.payout)} is above the idle room of ${formatUsd(quote.instantRoom)}. It opens a recall, and you can claim once the bot has repaid it.`
+              : `${formatUsd(quote.payout)} is above the idle room of ${formatUsd(quote.instantRoom)}. On the live vault this waits for a recall. In this preview you can still claim it.`}
         </p>
       )}
       {quote && !quote.ok && <p className="text-sm text-danger">{quote.error}</p>}
@@ -425,9 +449,9 @@ function WithdrawForm() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={async () => {
                     if (!ledgerApi.ready || !walletId) return;
-                    const result = ledgerApi.claim(walletId, withdrawal.id);
+                    const result = await ledgerApi.claim(walletId, withdrawal.id);
                     if (!result.ok) {
                       setError(result.error);
                       setNotice(null);
@@ -447,8 +471,9 @@ function WithdrawForm() {
       )}
       {queued && (
         <p className="text-xs leading-5 text-faint">
-          Recall claims pay immediately in this preview. On the live vault they wait for the
-          operator to return USDC, with a 48-hour deadline in the design.
+          {fromBot
+            ? "A queued claim pays once the bot has returned enough USDC. The deadline is 48 hours in the design and ten epochs in test mode."
+            : "Recall claims pay immediately in this preview. On the live vault they wait for the operator to return USDC, with a 48-hour deadline in the design."}
         </p>
       )}
     </form>

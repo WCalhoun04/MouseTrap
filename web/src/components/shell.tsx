@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { useIdentity, useLedger } from "@/components/providers";
+import { sourceLabel } from "@/lib/bot-api";
 import { formatWallet } from "@/lib/format";
 
 export function Shell({ children }: { children: ReactNode }) {
@@ -45,6 +46,9 @@ function Header() {
           </NavLink>
           <NavLink href="/health" active={pathname === "/health"}>
             Health
+          </NavLink>
+          <NavLink href="/operator" active={pathname === "/operator"}>
+            Operator
           </NavLink>
         </nav>
         <div className="ml-auto flex items-center gap-2 sm:gap-3">
@@ -164,17 +168,25 @@ function PreviewBanner() {
   return (
     <div className="border-b border-line">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
-        <p className="max-w-3xl text-sm leading-6 text-muted">
-          Preview ledger. A wallet names your position. Deposits and withdrawals move
-          preview USDC stored in this browser. Wallet tokens stay put until the escrow
-          program is deployed.
-        </p>
+        {ledger.ready && ledger.bot ? (
+          <p className="max-w-3xl text-sm leading-6 text-muted">
+            <span className="text-brass">{sourceLabel(ledger.bot)}.</span> The market maker bot
+            is running against a simulated escrow. Deposits fund its draws with test USDC. No
+            real orders or tokens move.
+          </p>
+        ) : (
+          <p className="max-w-3xl text-sm leading-6 text-muted">
+            Preview ledger. A wallet names your position. Deposits and withdrawals move
+            preview USDC stored in this browser. Wallet tokens stay put until the escrow
+            program is deployed.
+          </p>
+        )}
         {ledger.ready &&
           (armed ? (
             <button
               type="button"
               onClick={() => {
-                ledger.reset();
+                void ledger.reset();
                 setArmed(false);
               }}
               className="rounded-full border border-danger/40 px-3 py-1.5 text-sm text-danger"
@@ -187,7 +199,7 @@ function PreviewBanner() {
               onClick={() => setArmed(true)}
               className="rounded-full border border-line px-3 py-1.5 text-sm text-muted hover:text-paper"
             >
-              Reset preview data
+              {ledger.bot ? "Reset test data" : "Reset preview data"}
             </button>
           ))}
       </div>
