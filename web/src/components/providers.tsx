@@ -2,8 +2,7 @@
 
 import "./wallet-adapter.css";
 import "./wallet-theme.css";
-import { WalletAdapterNetwork } from "@solana/wallet-adapter-base";
-import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
+import { WalletAdapterNetwork, type WalletError } from "@solana/wallet-adapter-base";
 import {
   ConnectionProvider,
   useWallet,
@@ -122,17 +121,17 @@ const LedgerContext = createContext<LedgerValue>({ ready: false });
 
 export function Providers({ children }: { children: ReactNode }) {
   const endpoint = useMemo(() => clusterApiUrl("devnet"), []);
-  const wallets = useMemo(
-    () => [
-      new PhantomWalletAdapter(),
-      new SolflareWalletAdapter({ network: WalletAdapterNetwork.Devnet }),
-    ],
-    [],
-  );
+  // Phantom, MetaMask and other Wallet Standard wallets register themselves.
+  const wallets = useMemo(() => [new SolflareWalletAdapter({ network: WalletAdapterNetwork.Devnet })], []);
+  // A closed or declined wallet popup is not an error; forms show their own message.
+  const onError = useCallback((error: WalletError) => {
+    if (/rejected/i.test(error.message)) return;
+    console.error(error);
+  }, []);
 
   return (
     <ConnectionProvider endpoint={endpoint}>
-      <WalletProvider wallets={wallets} autoConnect>
+      <WalletProvider wallets={wallets} onError={onError} autoConnect>
         <WalletModalProvider>
           <IdentityProvider>
             <LedgerProvider>{children}</LedgerProvider>
