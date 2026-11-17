@@ -1,0 +1,20 @@
+[toolchain]
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.devnet]
+mousetrap_vault = "2rhxbbbqDtRPfGDAcd4LK7iqbR6Ro58R3QLs1NG9EZfd"
+
+[programs.localnet]
+mousetrap_vault = "2rhxbbbqDtRPfGDAcd4LK7iqbR6Ro58R3QLs1NG9EZfd"
+
+[provider]
+cluster = "localnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "cargo test"
+
+[hooks]
