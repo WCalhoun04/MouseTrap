@@ -14,18 +14,7 @@ export function Shell({ children }: { children: ReactNode }) {
     <div className="flex min-h-full flex-col">
       <div className="h-1 bg-brass" />
       <Header />
-      <main className="flex-1">{children}</main>
-      <footer className="mx-auto w-full max-w-6xl px-4 py-10 text-sm leading-6 text-faint sm:px-6">
-        <p>
-          MouseTrap is a maker-rebate vault. Stakers hold mvUSDC. The share price is
-          attested net asset value divided by shares. Yield here is that price change,
-          booked as maker rebates, liquidity rewards, and spread.
-        </p>
-        <p className="mt-2">
-          In the design, the operator earns a performance fee only above a hurdle. This
-          preview shows the full share-price change.
-        </p>
-      </footer>
+      <main className="flex-1 pb-10">{children}</main>
     </div>
   );
 }
@@ -37,7 +26,7 @@ function Header() {
       <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3 sm:px-6">
         <Link href="/" className="flex shrink-0 items-center gap-2.5 text-paper">
           <Image
-            src="/logo-mark.png"
+            src="/logo-mouse-square.png"
             alt=""
             width={512}
             height={512}
@@ -141,7 +130,7 @@ function WalletControl() {
           onClick={disablePreview}
           className="rounded-full border border-line px-3 py-2 text-sm text-paper hover:bg-sheet"
         >
-          Exit preview
+          Exit guest wallet
         </button>
       ) : (
         <button
@@ -149,7 +138,7 @@ function WalletControl() {
           onClick={enablePreview}
           className="px-1 text-sm text-muted underline-offset-4 hover:text-paper hover:underline"
         >
-          Preview wallet
+          Guest wallet
         </button>
       )}
       <button

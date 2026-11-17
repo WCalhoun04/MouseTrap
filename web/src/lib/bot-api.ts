@@ -207,10 +207,3 @@ export function splitByBookings(total: number, bookings: Booking[]) {
     spread: sum.spread * scale,
   };
 }
-
-export function sourceLabel(state: Pick<BotState, "source" | "dayFlow">): string {
-  const market = state.source === "gemini" ? "Live Gemini prices" : "Synthetic market";
-  return state.dayFlow
-    ? `${market}, each epoch replays one day of volume, simulated funds`
-    : `${market}, simulated funds`;
-}

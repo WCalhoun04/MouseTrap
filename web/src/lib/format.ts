@@ -60,7 +60,7 @@ export function formatAge(from: number, now: number): string {
 }
 
 export function formatWallet(id: string): string {
-  if (id === PREVIEW_WALLET_ID) return "Preview wallet";
+  if (id === PREVIEW_WALLET_ID) return "Guest wallet";
   if (id.length <= 10) return id;
   return `${id.slice(0, 4)}…${id.slice(-4)}`;
 }

@@ -2,7 +2,7 @@
 
 import "./wallet-adapter.css";
 import "./wallet-theme.css";
-import { WalletAdapterNetwork, type WalletError } from "@solana/wallet-adapter-base";
+import type { WalletError } from "@solana/wallet-adapter-base";
 import {
   ConnectionProvider,
   useWallet,
@@ -10,7 +10,6 @@ import {
 } from "@solana/wallet-adapter-react";
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import { SolflareWalletAdapter } from "@solana/wallet-adapter-solflare";
-import { clusterApiUrl } from "@solana/web3.js";
 import {
   createContext,
   useCallback,
@@ -120,9 +119,10 @@ const IdentityContext = createContext<IdentityValue | null>(null);
 const LedgerContext = createContext<LedgerValue>({ ready: false });
 
 export function Providers({ children }: { children: ReactNode }) {
-  const endpoint = useMemo(() => clusterApiUrl("devnet"), []);
+  // The demo runs on a local validator (AGENTS.md section 9). The bot reports the same URL in chain mode.
+  const endpoint = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "http://127.0.0.1:8899";
   // Phantom, MetaMask and other Wallet Standard wallets register themselves.
-  const wallets = useMemo(() => [new SolflareWalletAdapter({ network: WalletAdapterNetwork.Devnet })], []);
+  const wallets = useMemo(() => [new SolflareWalletAdapter()], []);
   // A closed or declined wallet popup is not an error; forms show their own message.
   const onError = useCallback((error: WalletError) => {
     if (/rejected/i.test(error.message)) return;
@@ -266,7 +266,7 @@ function LedgerProvider({ children }: { children: ReactNode }) {
             if (kind === "deposit") return chain.claimDeposit(wallet, Number(epoch));
             return chain.claimWithdraw(wallet, Number(epoch));
           }),
-        loadSample: () => ({ ok: false, error: "Samples only load in the browser preview." }),
+        loadSample: () => ({ ok: false, error: "Samples only load with the guest wallet." }),
         reset: async () => {},
         faucet: chain.info.faucet
           ? async (walletId) => {
@@ -298,7 +298,7 @@ function LedgerProvider({ children }: { children: ReactNode }) {
           run(botActions.deposit(walletId, amount, acceptRisk)),
         requestWithdraw: (walletId, amount) => run(botActions.requestWithdraw(walletId, amount)),
         claim: (walletId, withdrawalId) => run(botActions.claim(walletId, withdrawalId)),
-        loadSample: () => ({ ok: false, error: "Samples only load in the browser preview." }),
+        loadSample: () => ({ ok: false, error: "Samples only load with the guest wallet." }),
         reset: async () => {
           await botActions.reset();
           await refresh();

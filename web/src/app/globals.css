@@ -27,3 +27,35 @@ body {
   background: #e4b15c;
   color: #2a1d0c;
 }
+
+/* Scrollbars for tables and lists (ScrollBox): thin, in the site's palette. */
+.scroll-themed {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+
+.scroll-themed:hover {
+  scrollbar-color: color-mix(in srgb, var(--color-brass) 55%, var(--color-sheet)) transparent;
+}
+
+/* Browsers without scrollbar-color (older Safari) use the WebKit pseudo-elements. */
+@supports not (scrollbar-color: auto) {
+  .scroll-themed::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .scroll-themed::-webkit-scrollbar-track,
+  .scroll-themed::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  .scroll-themed::-webkit-scrollbar-thumb {
+    background: var(--color-line);
+    border-radius: 9999px;
+  }
+
+  .scroll-themed:hover::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--color-brass) 55%, var(--color-sheet));
+  }
+}

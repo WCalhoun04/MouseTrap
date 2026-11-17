@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { PageLoader } from "@/components/page-loader";
+import { ScrollBox, STICKY_HEAD } from "@/components/scroll-box";
 import { useLedger } from "@/components/providers";
 import {
   BOT_URL,
   fetchBot,
-  sourceLabel,
   type BotStatus,
   type Usage,
 } from "@/lib/bot-api";
@@ -50,7 +51,7 @@ export function OperatorScreen() {
   const ledgerApi = useLedger();
 
   if (!loaded) {
-    return <p className="px-4 py-16 text-sm text-muted sm:px-6">Looking for the bot…</p>;
+    return <PageLoader />;
   }
 
   if (!status) {
@@ -61,8 +62,8 @@ export function OperatorScreen() {
           <h2 className="font-serif text-2xl">The bot is not running</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
             This view shows the market maker&apos;s quotes, fills and draws. Start the bot
-            and this page fills in within a few seconds. It trades simulated funds against live
-            Gemini order books.
+            and this page fills in within a few seconds. It quotes against live Gemini order
+            books.
           </p>
           <pre className="mt-4 overflow-x-auto rounded-xl border border-line bg-ink p-4 font-mono text-sm text-paper">
             cd bot{"\n"}npm install{"\n"}npm run test-mode
@@ -85,11 +86,10 @@ export function OperatorScreen() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="font-serif text-4xl tracking-tight">Operator</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-            {sourceLabel(status)}. Every order is maker-or-cancel and sits inside the $0.20 to
-            $0.80 rebate band.
-            {status.killReason ? ` ${status.killReason}.` : ""}
-          </p>
+          {/* Shown only while quotes are pulled or reduced, to say why. */}
+          {status.killReason && (
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-danger">{status.killReason}.</p>
+          )}
         </div>
       </div>
 
@@ -102,15 +102,15 @@ export function OperatorScreen() {
 
       <section className="rounded-2xl border border-line bg-sheet p-5 sm:p-6">
         <h2 className="font-mono text-[11px] tracking-[0.16em] text-faint uppercase">Quotes</h2>
-        <div className="mt-3 overflow-x-auto">
+        <ScrollBox size="lg" className="mt-3">
           <table className="w-full min-w-[44rem] text-left text-sm">
-            <thead className="font-mono text-[11px] tracking-[0.14em] text-faint uppercase">
+            <thead className={`font-mono text-[11px] tracking-[0.14em] text-faint uppercase ${STICKY_HEAD}`}>
               <tr>
                 <th className="py-2 font-normal">Contract</th>
-                <th className="py-2 text-right font-normal">Market</th>
-                <th className="py-2 text-right font-normal">Our bid</th>
-                <th className="py-2 text-right font-normal">Our ask</th>
-                <th className="py-2 text-right font-normal">Position</th>
+                <th className="py-2 font-normal">Market</th>
+                <th className="py-2 font-normal" title="Our bid">Bid</th>
+                <th className="py-2 font-normal" title="Our ask">Ask</th>
+                <th className="py-2 font-normal" title="Position">Pos</th>
               </tr>
             </thead>
             <tbody>
@@ -124,17 +124,17 @@ export function OperatorScreen() {
                       {c.rewardEligible ? " · reward-eligible" : ""}
                     </p>
                   </td>
-                  <td className="py-2 text-right font-mono tabular-nums text-muted">
+                  <td className="py-2 font-mono tabular-nums text-muted">
                     {formatCents(c.marketBid)} / {formatCents(c.marketAsk)}
                   </td>
-                  <td className="py-2 text-right font-mono tabular-nums">
+                  <td className="py-2 font-mono tabular-nums">
                     {c.ourBid ? `${c.ourBid.qty} @ ${formatCents(c.ourBid.price)}` : "—"}
                   </td>
-                  <td className="py-2 text-right font-mono tabular-nums">
+                  <td className="py-2 font-mono tabular-nums">
                     {c.ourAsk ? `${c.ourAsk.qty} @ ${formatCents(c.ourAsk.price)}` : "—"}
                   </td>
                   <td
-                    className={`py-2 text-right font-mono tabular-nums ${
+                    className={`py-2 font-mono tabular-nums ${
                       c.position === 0 ? "text-faint" : "text-paper"
                     }`}
                   >
@@ -151,7 +151,7 @@ export function OperatorScreen() {
               )}
             </tbody>
           </table>
-        </div>
+        </ScrollBox>
       </section>
 
       <div className="grid gap-4 lg:grid-cols-5">
@@ -159,37 +159,40 @@ export function OperatorScreen() {
           <h2 className="font-mono text-[11px] tracking-[0.16em] text-faint uppercase">
             Recent fills
           </h2>
-          {status.fills.length === 0 ? (
-            <p className="mt-3 text-sm leading-6 text-muted">
-              No fills yet. A paper quote fills when a trade reaches its price, or when the
-              market moves through it.
-            </p>
-          ) : (
-            <ul className="mt-2 divide-y divide-line">
-              {status.fills.slice(0, 12).map((fill) => (
-                <li key={fill.id} className="flex items-baseline justify-between gap-3 py-2">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm">
-                      {fill.side === "bid" ? "Bought" : "Sold"} {fill.qty} @{" "}
-                      {formatCents(fill.price)}
-                      {fill.simulated ? " · simulated taker" : ""}
+          <ScrollBox className="mt-2">
+            {status.fills.length === 0 ? (
+              <p className="pt-1 text-sm leading-6 text-muted">
+                No fills yet. A paper quote fills when a trade reaches its price, or when the
+                market moves through it.
+              </p>
+            ) : (
+              <ul className="divide-y divide-line">
+                {status.fills.map((fill) => (
+                  <li key={fill.id} className="flex items-baseline justify-between gap-3 py-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm">
+                        {fill.side === "bid" ? "Bought" : "Sold"} {fill.qty} @{" "}
+                        {formatCents(fill.price)}
+                        {fill.simulated ? " · replayed volume" : ""}
+                      </p>
+                      <p className="truncate text-xs text-faint">
+                        {fill.title} · {formatClock(fill.at)}
+                      </p>
+                    </div>
+                    <p className="font-mono text-sm tabular-nums text-sage">
+                      +{formatUsd(fill.rebate, 4)}
                     </p>
-                    <p className="truncate text-xs text-faint">
-                      {fill.title} · {formatClock(fill.at)}
-                    </p>
-                  </div>
-                  <p className="font-mono text-sm tabular-nums text-sage">
-                    +{formatUsd(fill.rebate, 4)}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </ScrollBox>
         </section>
 
-        <section className="rounded-2xl border border-line bg-sheet p-5 sm:p-6 lg:col-span-2">
+        <section className="flex flex-col rounded-2xl border border-line bg-sheet p-5 sm:p-6 lg:col-span-2">
           <h2 className="font-mono text-[11px] tracking-[0.16em] text-faint uppercase">Edge</h2>
-          <dl className="mt-4 space-y-3">
+          {/* Rows spread to the card's height, which the Recent fills card beside it sets. */}
+          <dl className="mt-4 flex flex-1 flex-col justify-between gap-3">
             <Row label="Fills" value={`${status.edge.fills} (${status.edge.contracts} contracts)`} />
             <Row label="Filled notional" value={formatUsd(status.edge.filledNotional)} />
             <Row label="Rebate per $ filled" value={pct(status.edge.rebatePerDollar)} />
@@ -200,17 +203,13 @@ export function OperatorScreen() {
             <Row label="Markout 5 min" value={cents(status.markouts.m5)} />
             <Row label="Hedge" value={status.hedger === "none" ? "Not built yet" : status.hedger} />
           </dl>
-          <p className="mt-4 text-sm leading-6 text-faint">
-            Markouts are cents per contract; positive means the price moved the bot&apos;s way
-            after the fill. The Phase 0 gate is positive post-waiver edge over 30 days.
-          </p>
         </section>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-5">
         <section className="rounded-2xl border border-line bg-sheet p-5 sm:p-6 lg:col-span-3">
           <h2 className="font-mono text-[11px] tracking-[0.16em] text-faint uppercase">
-            Draw gate preview
+            Draw gate
           </h2>
           {bot ? (
             <ul className="mt-2 divide-y divide-line">
@@ -231,8 +230,8 @@ export function OperatorScreen() {
             <p className="mt-3 text-sm text-muted">Waiting for vault state.</p>
           )}
           <dl className="mt-4 space-y-3 border-t border-line pt-4">
-            <Row label="Capital the bot wants" value={formatUsd(status.relayer.capitalWanted)} />
-            <Row label="Cash on exchange" value={formatUsd(status.exchange.cash)} />
+            <Row label="Requested Capital" value={formatUsd(status.relayer.capitalWanted)} />
+            <Row label="Trading Capital" value={formatUsd(status.exchange.cash)} />
             <Row
               label="Draws"
               value={status.relayer.drawsAllowed ? "Allowed" : (status.relayer.drawBlockReason ?? "Held")}
@@ -263,20 +262,22 @@ export function OperatorScreen() {
         <h2 className="font-mono text-[11px] tracking-[0.16em] text-faint uppercase">
           Relayer and bot log
         </h2>
-        {status.log.length === 0 ? (
-          <p className="mt-3 text-sm text-muted">Nothing logged yet.</p>
-        ) : (
-          <ul className="mt-2 divide-y divide-line">
-            {status.log.slice(0, 10).map((entry, index) => (
-              <li key={`${entry.at}-${index}`} className="flex items-baseline gap-3 py-2">
-                <span className="shrink-0 font-mono text-xs text-faint">
-                  {formatClock(entry.at)}
-                </span>
-                <span className="text-sm">{entry.text}</span>
-              </li>
-            ))}
-          </ul>
-        )}
+        <ScrollBox className="mt-2">
+          {status.log.length === 0 ? (
+            <p className="pt-1 text-sm text-muted">Nothing logged yet.</p>
+          ) : (
+            <ul className="divide-y divide-line">
+              {status.log.map((entry, index) => (
+                <li key={`${entry.at}-${index}`} className="flex items-baseline gap-3 py-2">
+                  <span className="shrink-0 font-mono text-xs text-faint">
+                    {formatClock(entry.at)}
+                  </span>
+                  <span className="text-sm">{entry.text}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </ScrollBox>
       </section>
     </div>
   );

@@ -1,6 +1,8 @@
 "use client";
 
 import { useIdentity, useLedger } from "@/components/providers";
+import { PageLoader } from "@/components/page-loader";
+import { ScrollBox, STICKY_HEAD } from "@/components/scroll-box";
 import { formatAge, formatClock, formatDate, formatPct, formatUsd, formatWhen } from "@/lib/format";
 import {
   BOND_MIN,
@@ -16,7 +18,7 @@ export function HealthScreen() {
   const ledgerApi = useLedger();
 
   if (!identity.ready || !ledgerApi.ready) {
-    return <p className="px-4 py-16 text-sm text-muted sm:px-6">Loading health…</p>;
+    return <PageLoader />;
   }
 
   const { ledger, now, bot } = ledgerApi;
@@ -84,11 +86,11 @@ export function HealthScreen() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="font-serif text-4xl tracking-tight">Vault health</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-            {bot
-              ? "These readings come from the simulated escrow the bot draws from. It enforces the same eight draw-gate conditions as the on-chain design, with the time limits scaled to the epoch length."
-              : "These readings follow the draw-gate rules. They are computed in the preview until attestors sign a NAV report on-chain."}
-          </p>
+          {!bot && (
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
+              These readings follow the draw-gate rules.
+            </p>
+          )}
         </div>
       </div>
 
@@ -141,7 +143,7 @@ export function HealthScreen() {
           </dl>
           <p className="mt-4 text-sm leading-6 text-faint">
             {bot
-              ? "The bot reads its own paper account and posts NAV itself. The design has three independent attestors and a 2 of 3 quorum."
+              ? "NAV is signed by a single attestor key. Independent attestors with a 2 of 3 quorum come later."
               : "A positions hash will show here when attestors post the report. The quorum in the design is 2 of 3."}
           </p>
         </div>
@@ -156,18 +158,15 @@ export function HealthScreen() {
             ? `Each row is one ${bot.epochSeconds}-second epoch, standing in for a day: the rebate payout, then spread marked to mid, on 1,000 shares.`
             : "Each row is that day's share-price change on 1,000 shares, split the same way as personal yield."}
         </p>
-        {bot && book.length === 0 && (
-          <p className="mt-4 text-sm text-faint">The first epoch has not settled yet.</p>
-        )}
-        <div className="mt-4 overflow-x-auto">
+        <ScrollBox className="mt-4">
           <table className="w-full min-w-[36rem] text-left text-sm">
-            <thead className="font-mono text-[11px] tracking-[0.14em] text-faint uppercase">
+            <thead className={`font-mono text-[11px] tracking-[0.14em] text-faint uppercase ${STICKY_HEAD}`}>
               <tr>
                 <th className="py-2 font-normal">{bot ? "Epoch" : "Day"}</th>
                 <th className="py-2 font-normal">Rebates</th>
                 <th className="py-2 font-normal">Rewards</th>
                 <th className="py-2 font-normal">Spread</th>
-                <th className="py-2 text-right font-normal">Net</th>
+                <th className="py-2 font-normal">Net</th>
               </tr>
             </thead>
             <tbody>
@@ -181,14 +180,21 @@ export function HealthScreen() {
                   <td className={`py-2 ${row.spread < 0 ? "text-danger" : ""}`}>
                     {formatUsd(row.spread, digits)}
                   </td>
-                  <td className={`py-2 text-right ${row.net < 0 ? "text-danger" : "text-sage"}`}>
+                  <td className={`py-2 ${row.net < 0 ? "text-danger" : "text-sage"}`}>
                     {formatUsd(row.net, digits)}
                   </td>
                 </tr>
               ))}
+              {book.length === 0 && (
+                <tr className="border-t border-line">
+                  <td colSpan={5} className="py-3 font-sans text-faint">
+                    The first epoch has not settled yet.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
-        </div>
+        </ScrollBox>
       </section>
     </div>
   );

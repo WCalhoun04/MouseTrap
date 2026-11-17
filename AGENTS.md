@@ -257,6 +257,18 @@ The app's main job is to make the off-chain leg auditable: every staker should s
 
 Stack: Next.js, Solana wallet adapter, an Anchor-generated TypeScript client, and an indexer for program events. Risk disclosures and any depositor eligibility checks counsel requires sit in front of the first deposit.
 
+### Hackathon build (`web/`)
+
+What the app does today, where it differs from the table above:
+
+- **Where the data comes from:** with the bot in chain mode on localnet (section 9), the wallet signs deposits, withdrawal requests and claims sent straight to the escrow program (`web/src/lib/chain.ts`), and a faucet button funds the wallet with test SOL and USDC. With the bot running without `--chain`, the app shows the bot's simulated vault. With no bot, a guest wallet uses a ledger kept in the browser. The bot's local API stands in for an indexer
+- **Vault:** yield, its split into rebates, rewards and spread, share price chart, deposit and withdraw, pending claims, position and activity. No risk disclosure or eligibility step before the first deposit; one is needed before any real money
+- **Health:** headline figures, the eight draw-gate checks, the latest NAV report and booking per epoch
+- **Operator:** read-only. Quotes, recent fills, edge and markouts, the draw gate with requested and trading capital, risk limits and the relayer log. It has no buttons: pause, force recall and quote stop are calls to the bot's API, not part of the app
+- **Governance:** not built. Section 5 fixes config at initialisation, so there are no timelocked changes to show
+- **Copy:** the site carries no test-mode, devnet or "simulated" wording, and no explanatory footnotes; explanations live in this file and the READMEs
+- **Shared components:** tables and lists sit in fixed-height boxes that scroll, with themed scrollbars (`scroll-box.tsx`, `.scroll-themed` in `globals.css`); every page shows the same loader, BlinkBlur from `react-loading-indicators` in shades of the brass colour (`page-loader.tsx`); the mouse logo (`public/logo-mouse-square.png`) is the header mark and favicon
+
 ---
 
 ## 8. Risks
@@ -280,6 +292,19 @@ The two risks most likely to sink this are regulatory (pooling outside money to 
 
 ## 9. Build plan
 
+### Hackathon demo environment
+
+The hackathon demo runs on a local Solana validator (localnet) on the presenter's machine, not on devnet or mainnet.
+
+- **Cluster:** `solana-test-validator` with the escrow program loaded, reset on each start. The vault, test USDC mint and all role keys come from `npm run localnet:setup` in `bot/`
+- **Who holds the keys:** the bot holds the operator, sentinel and single attestor keys and acts as the epoch crank, as section 5 scopes it
+- **Web app:** connects to `http://127.0.0.1:8899` by default (`NEXT_PUBLIC_SOLANA_RPC_URL` overrides). Stakers use the app's faucet for test SOL and USDC; Phantom needs Testnet Mode with Solana Localnet selected so it simulates against the same chain
+- **Gemini leg:** the bot quotes against live Gemini order books with paper fills; a token account on the validator stands in for the Gemini deposit address
+- **Why localnet:** free, works offline, one-minute epochs, and a clean state for every run. The cost is that only the presenter's machine can stake; nobody else can try the vault from their own wallet
+- **Devnet:** an earlier deployment of the program exists on devnet (see `bot/README.md`) but is not part of the demo and is not maintained
+
+### Phases
+
 Prove the trading edge with the operator's own money before writing the vault. Phase 2 is the first phase that takes deposits. Each gate must pass before the next phase starts.
 
 1. **Phase 0 · Validate the edge (no outside money)**
@@ -287,7 +312,7 @@ Prove the trading edge with the operator's own money before writing the vault. P
    - Run the bot in Gemini's demo environment, then small live size; log fills, markouts and rebates
    - **Gate:** positive net edge on post-waiver fee economics over 30 days
 2. **Phase 1 · Operator-capital pilot**
-   - Bot trades operator money only; attestors publish a daily NAV report to devnet
+   - Bot trades operator money only; attestors publish a daily NAV report to a public test cluster
    - Build the risk engine, kill switch and PnL attribution (rebate, spread, hedge)
    - **Gate:** attested NAV matches Gemini statements every day; drawdown stays inside limits
 3. **Phase 2 · Vault MVP, capped** (first phase with staker deposits)

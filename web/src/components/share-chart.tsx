@@ -8,6 +8,7 @@ export function ShareChart({
   livePrice,
   span = "over 90 days",
   clock = false,
+  className = "",
 }: {
   points: { t: number; price: number }[];
   livePrice: number;
@@ -15,6 +16,7 @@ export function ShareChart({
   span?: string;
   /** Label the ends with times of day, for a series that covers minutes, not months. */
   clock?: boolean;
+  className?: string;
 }) {
   const gradientId = useId().replace(/:/g, "");
   const data = points.map((point, index) =>
@@ -44,22 +46,26 @@ export function ShareChart({
   const last = data[data.length - 1];
 
   return (
-    <figure>
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        className="h-auto w-full"
-        role="img"
-        aria-label={`Share price ${span}, from ${formatUsd(first.price, 4)} to ${formatUsd(last.price, 4)}`}
-      >
-        <defs>
-          <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="#e4b15c" stopOpacity="0.35" />
-            <stop offset="100%" stopColor="#e4b15c" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <path d={area} fill={`url(#${gradientId})`} />
-        <path d={line} fill="none" stroke="#e4b15c" strokeWidth="2" />
-      </svg>
+    <figure className={`flex flex-col ${className}`}>
+      {/* Keeps the 640×200 shape on narrow screens; on wide ones it stretches to fill its card. */}
+      <div className="relative aspect-[16/5] lg:aspect-auto lg:min-h-48 lg:flex-1">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          preserveAspectRatio="none"
+          className="absolute inset-0 h-full w-full"
+          role="img"
+          aria-label={`Share price ${span}, from ${formatUsd(first.price, 4)} to ${formatUsd(last.price, 4)}`}
+        >
+          <defs>
+            <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor="#e4b15c" stopOpacity="0.35" />
+              <stop offset="100%" stopColor="#e4b15c" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path d={area} fill={`url(#${gradientId})`} />
+          <path d={line} fill="none" stroke="#e4b15c" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+        </svg>
+      </div>
       <figcaption className="mt-2 flex justify-between font-mono text-[11px] text-faint">
         <span>{clock ? formatClock(first.t) : formatDate(first.t)}</span>
         <span>{clock ? formatClock(last.t) : formatDate(last.t)}</span>

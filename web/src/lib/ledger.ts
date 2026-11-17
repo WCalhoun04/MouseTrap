@@ -315,7 +315,7 @@ export function deposit(
   const usdc = cents(amount);
   if (!(usdc > 0)) return { ok: false, error: "Enter a USDC amount." };
   if (usdc > user.cash + 0.001) {
-    return { ok: false, error: "That is more preview USDC than you have." };
+    return { ok: false, error: "That is more guest USDC than you have." };
   }
   const price = sharePrice(ledger.vault);
   const minted = usdc / price;

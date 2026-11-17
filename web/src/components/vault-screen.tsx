@@ -1,6 +1,8 @@
 "use client";
 
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
+import { PageLoader } from "@/components/page-loader";
+import { ScrollBox, STICKY_HEAD } from "@/components/scroll-box";
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { useIdentity, useLedger } from "@/components/providers";
@@ -33,7 +35,7 @@ export function VaultScreen() {
   const ledgerApi = useLedger();
 
   if (!identity.ready || !ledgerApi.ready) {
-    return <p className="px-4 py-16 text-sm text-muted sm:px-6">Loading the vault…</p>;
+    return <PageLoader />;
   }
 
   const { ledger, now, bot } = ledgerApi;
@@ -49,6 +51,7 @@ export function VaultScreen() {
   const baseYield = user ? accountYield(user, view.price) : null;
   const yieldView =
     bot && baseYield ? { ...baseYield, ...splitByBookings(baseYield.total, bot.bookings) } : baseYield;
+  const yieldText = yieldCopy(identity.walletId, user, yieldView);
   const statusLabel =
     status === "open" ? "Draws open" : status === "blocked" ? "Draws blocked" : "Recall open";
 
@@ -84,9 +87,7 @@ export function VaultScreen() {
             >
               {yieldView ? formatUsd(yieldView.total) : "—"}
             </p>
-            <p className="mt-2 max-w-xl text-sm leading-6 text-muted">
-              {yieldCopy(identity.walletId, user, yieldView)}
-            </p>
+            {yieldText && <p className="mt-2 max-w-xl text-sm leading-6 text-muted">{yieldText}</p>}
           </div>
           {!bot && identity.walletId && user && user.lifetimeDeposited === 0 && (
             <button
@@ -105,17 +106,10 @@ export function VaultScreen() {
             <Split label="Spread" value={yieldView.spread} />
           </ul>
         )}
-        {yieldView && (
-          <p className="mt-4 text-sm leading-6 text-faint">
-            {bot
-              ? "Split in the proportions the vault booked from the bot's fills: rebates paid, and spread marked to mid. Liquidity rewards cannot be earned on paper, so they show as zero."
-              : "Positive yield is booked 78% rebates, 27% liquidity rewards, and a 5% spread drag. A loss is booked entirely as spread. Start the bot to see books from its fill log."}
-          </p>
-        )}
       </section>
 
       <div className="grid gap-4 lg:grid-cols-5">
-        <section className="rounded-2xl border border-line bg-sheet p-5 sm:p-6 lg:col-span-3">
+        <section className="flex flex-col rounded-2xl border border-line bg-sheet p-5 sm:p-6 lg:col-span-3">
           <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="font-mono text-[11px] tracking-[0.16em] text-faint uppercase">
@@ -132,6 +126,7 @@ export function VaultScreen() {
             livePrice={view.price}
             span={bot ? "this session" : "over 90 days"}
             clock={Boolean(bot)}
+            className="flex-1"
           />
         </section>
         <TradePanel />
@@ -162,10 +157,7 @@ function yieldCopy(
   yieldView: { total: number; pct: number } | null,
 ): string {
   if (!walletId) return "Connect a wallet to see the yield on your shares.";
-  if (!user || user.lifetimeDeposited === 0) {
-    return "No position yet. A deposit starts you at today's share price, so yield begins at zero.";
-  }
-  if (!yieldView) return "";
+  if (!user || user.lifetimeDeposited === 0 || !yieldView) return "";
   return `${formatPct(yieldView.pct)} on ${formatUsd(user.lifetimeDeposited)} deposited${
     user.depositedAt ? `, since ${formatWhen(user.depositedAt)} UTC` : ""
   }.`;
@@ -183,7 +175,7 @@ function TradePanel() {
         <div>
           <h2 className="font-serif text-2xl">Open a position</h2>
           <p className="mt-2 text-sm leading-6 text-muted">
-            Connect Phantom or Solflare, or use a preview wallet to try deposit,
+            Connect Phantom or Solflare, or use a guest wallet to try deposit,
             yield, and withdraw in this browser.
           </p>
         </div>
@@ -195,7 +187,7 @@ function TradePanel() {
   }
 
   return (
-    <section className="rounded-2xl border border-line bg-sheet p-5 sm:p-6 lg:col-span-2">
+    <section className="flex flex-col rounded-2xl border border-line bg-sheet p-5 sm:p-6 lg:col-span-2">
       <div className="grid grid-cols-2 rounded-full border border-line p-1 text-sm">
         <TabButton active={tab === "deposit"} onClick={() => setTab("deposit")}>
           Deposit
@@ -252,7 +244,7 @@ function HeaderConnect() {
           onClick={enablePreview}
           className="rounded-full border border-line px-4 py-2 text-sm text-paper"
         >
-          Preview wallet
+          Guest wallet
         </button>
       )}
     </>
@@ -420,7 +412,7 @@ function WithdrawForm() {
             ? `${formatUsd(quote.payout)} can be claimed from the idle buffer.`
             : fromBot
               ? `${formatUsd(quote.payout)} is above the idle room of ${formatUsd(quote.instantRoom)}. It opens a recall, and you can claim once the bot has repaid it.`
-              : `${formatUsd(quote.payout)} is above the idle room of ${formatUsd(quote.instantRoom)}. On the live vault this waits for a recall. In this preview you can still claim it.`}
+              : `${formatUsd(quote.payout)} is above the idle room of ${formatUsd(quote.instantRoom)}. It is paid from a recall on the operator.`}
         </p>
       )}
       {quote && !quote.ok && <p className="text-sm text-danger">{quote.error}</p>}
@@ -440,7 +432,7 @@ function WithdrawForm() {
         <p className="text-xs leading-5 text-faint">
           {fromBot
             ? "A queued claim pays once the bot has returned enough USDC. The deadline is 48 hours in the design and ten epochs here."
-            : "Recall claims pay immediately in this preview. On the live vault they wait for the operator to return USDC, with a 48-hour deadline in the design."}
+            : "Recall claims wait for the operator to return USDC, with a 48-hour deadline."}
         </p>
       )}
     </form>
@@ -454,54 +446,60 @@ function Tickets() {
   const [notice, setNotice] = useState<string | null>(null);
   if (!ledgerApi.ready || !walletId) return null;
   const user = getUser(ledgerApi.ledger, walletId);
-  if (user.withdrawals.length === 0) return null;
   const price = sharePrice(ledgerApi.ledger.vault);
 
   return (
-    <div className="mt-5">
-      <ul className="border-t border-line">
-        {user.withdrawals.map((withdrawal) => {
-          const payout = withdrawal.usdc ?? withdrawal.shares * price;
-          const isDeposit = withdrawal.id.startsWith("deposit:");
-          return (
-            <li
-              key={withdrawal.id}
-              className="flex flex-wrap items-center justify-between gap-3 border-b border-line py-3"
-            >
-              <div>
-                <p className="font-mono tabular-nums">{formatUsd(payout)}</p>
-                <p className="text-xs text-faint">
-                  {withdrawal.note ??
-                    (withdrawal.settlement === "instant" ? "Idle buffer" : "Awaiting recall")}{" "}
-                  · {formatWhen(withdrawal.requestedAt)} UTC
-                </p>
-              </div>
-              <button
-                type="button"
-                disabled={withdrawal.claimable === false}
-                onClick={async () => {
-                  if (!ledgerApi.ready || !walletId) return;
-                  const result = await ledgerApi.claim(walletId, withdrawal.id);
-                  if (!result.ok) {
-                    setError(result.error);
-                    setNotice(null);
-                    return;
-                  }
-                  setError(null);
-                  setNotice(
-                    isDeposit
-                      ? "Shares claimed into your wallet."
-                      : `Claimed ${formatUsd(payout)} into ${ledgerApi.onChain ? "your wallet" : "preview USDC"}.`,
-                  );
-                }}
-                className="rounded-full bg-brass px-4 py-2 text-sm font-medium text-brass-ink hover:bg-[#f0c56e] disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {isDeposit ? "Claim shares" : "Claim"}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+    <div className="mt-5 flex min-h-0 flex-1 flex-col">
+      {/* With no claims there is nothing to scroll, so the card ends at this line. */}
+      {user.withdrawals.length === 0 ? (
+        <p className="border-t border-line pt-3 text-sm text-faint">No pending claims.</p>
+      ) : (
+        <ScrollBox size="fill" className="border-t border-line">
+          <ul>
+            {user.withdrawals.map((withdrawal) => {
+              const payout = withdrawal.usdc ?? withdrawal.shares * price;
+              const isDeposit = withdrawal.id.startsWith("deposit:");
+              return (
+                <li
+                  key={withdrawal.id}
+                  className="flex flex-wrap items-center justify-between gap-3 border-b border-line py-3"
+                >
+                  <div>
+                    <p className="font-mono tabular-nums">{formatUsd(payout)}</p>
+                    <p className="text-xs text-faint">
+                      {withdrawal.note ??
+                        (withdrawal.settlement === "instant" ? "Idle buffer" : "Awaiting recall")}{" "}
+                      · {formatWhen(withdrawal.requestedAt)} UTC
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={withdrawal.claimable === false}
+                    onClick={async () => {
+                      if (!ledgerApi.ready || !walletId) return;
+                      const result = await ledgerApi.claim(walletId, withdrawal.id);
+                      if (!result.ok) {
+                        setError(result.error);
+                        setNotice(null);
+                        return;
+                      }
+                      setError(null);
+                      setNotice(
+                        isDeposit
+                          ? "Shares claimed into your wallet."
+                          : `Claimed ${formatUsd(payout)} into ${ledgerApi.onChain ? "your wallet" : "guest USDC"}.`,
+                      );
+                    }}
+                    className="rounded-full bg-brass px-4 py-2 text-sm font-medium text-brass-ink hover:bg-[#f0c56e] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {isDeposit ? "Claim shares" : "Claim"}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </ScrollBox>
+      )}
       {error && (
         <p role="alert" className="mt-3 text-sm text-danger">
           {error}
@@ -551,15 +549,15 @@ function PositionCard() {
     : 0;
 
   return (
-    <section className="rounded-2xl border border-line bg-sheet p-5 sm:p-6">
+    <section className="rounded-2xl border border-line bg-sheet px-5 pt-5 pb-3 sm:px-6 sm:pt-6 sm:pb-4">
       <h2 className="font-mono text-[11px] tracking-[0.16em] text-faint uppercase">Position</h2>
       {!walletId || !user ? (
         <p className="mt-3 text-sm text-muted">
-          Connect a wallet to see shares and {ledgerApi.onChain ? "USDC" : "preview USDC"}.
+          Connect a wallet to see shares and {ledgerApi.onChain ? "USDC" : "guest USDC"}.
         </p>
       ) : (
         <dl className="mt-4 grid grid-cols-2 gap-4">
-          <Stat label={ledgerApi.onChain ? "Wallet USDC" : "Preview USDC"} value={formatUsd(user.cash)} />
+          <Stat label={ledgerApi.onChain ? "Wallet USDC" : "Guest USDC"} value={formatUsd(user.cash)} />
           <Stat label="Position" value={formatUsd(openValue + queuedValue)} />
           <Stat label="Available" value={formatShares(user.shares)} />
           <Stat label="Queued" value={formatUsd(queuedValue)} />
@@ -579,22 +577,31 @@ function ActivityCard() {
   const activity = walletId ? getUser(ledgerApi.ledger, walletId).activity : [];
 
   return (
-    <section className="rounded-2xl border border-line bg-sheet p-5 sm:p-6">
+    <section className="rounded-2xl border border-line bg-sheet px-5 pt-5 pb-3 sm:px-6 sm:pt-6 sm:pb-4">
       <h2 className="font-mono text-[11px] tracking-[0.16em] text-faint uppercase">Activity</h2>
       {activity.length === 0 ? (
         <p className="mt-3 text-sm text-muted">Deposits and withdrawals will show up here.</p>
       ) : (
-        <ul className="mt-3 divide-y divide-line">
-          {activity.map((item) => (
-            <li key={item.id} className="flex items-baseline justify-between gap-3 py-3">
-              <div>
-                <p className="text-sm">{activityLabel(item.kind)}</p>
-                <p className="text-xs text-faint">{formatWhen(item.at)} UTC</p>
-              </div>
-              <p className="font-mono text-sm tabular-nums">{formatUsd(item.usdc)}</p>
-            </li>
-          ))}
-        </ul>
+        <ScrollBox className="mt-3">
+          <table className="w-full text-left text-sm">
+            <thead className={`font-mono text-[11px] tracking-[0.14em] text-faint uppercase ${STICKY_HEAD}`}>
+              <tr>
+                <th className="py-2 font-normal">Type</th>
+                <th className="py-2 font-normal">Time (UTC)</th>
+                <th className="py-2 font-normal">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {activity.map((item) => (
+                <tr key={item.id} className="border-t border-line">
+                  <td className="py-2">{activityLabel(item.kind)}</td>
+                  <td className="py-2 text-muted">{formatWhen(item.at)}</td>
+                  <td className="py-2 font-mono tabular-nums">{formatUsd(item.usdc)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </ScrollBox>
       )}
     </section>
   );

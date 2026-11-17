@@ -27,7 +27,7 @@ export const metadata: Metadata = {
   title: "Mouse Trap",
   description:
     "Deposit into the maker-rebate vault, see your yield, and withdraw mvUSDC.",
-  icons: { icon: "/logo-mark.png" },
+  icons: { icon: "/logo-mouse-square.png" },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
