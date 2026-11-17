@@ -130,6 +130,9 @@ async function main() {
   };
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());
+  // web3.js confirms transactions with racing requests and drops the loser's error; on a
+  // rate-limited RPC that rejection would otherwise kill the bot with quotes still resting.
+  process.on("unhandledRejection", (err) => log(`RPC error ignored: ${err instanceof Error ? err.message : String(err)}`));
 }
 
 main().catch((err) => {
