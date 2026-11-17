@@ -42,6 +42,9 @@ export type VaultParams = {
 export type Config = {
   mode: Mode;
   offline: boolean;
+  /** Use the escrow program on a Solana validator instead of the simulated vault. */
+  chain: boolean;
+  rpcUrl: string;
   /** Replay one day of each contract's real volume per epoch (test mode). */
   dayFlow: boolean;
   /** Share of taker flow that reaches the bot rather than another maker. */
@@ -93,6 +96,7 @@ const Env = z.object({
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_API_SECRET: z.string().optional(),
   MODE: z.string().optional(),
+  SOLANA_RPC_URL: z.string().default("http://127.0.0.1:8899"),
   I_UNDERSTAND_LIVE_TRADING: z.string().optional(),
 });
 
@@ -100,7 +104,7 @@ const DAY_MS = 86_400_000;
 
 export function loadConfig(
   mode: Mode,
-  flags: { offline?: boolean } = {},
+  flags: { offline?: boolean; chain?: boolean } = {},
   env: Record<string, string | undefined> = process.env,
 ): Config {
   const e = Env.parse(env);
@@ -122,6 +126,8 @@ export function loadConfig(
   return {
     mode,
     offline: Boolean(flags.offline),
+    chain: Boolean(flags.chain),
+    rpcUrl: e.SOLANA_RPC_URL,
     dayFlow: test && e.DAY_FLOW === "on",
     captureShare: e.CAPTURE_SHARE,
     informedShare: e.INFORMED_SHARE,

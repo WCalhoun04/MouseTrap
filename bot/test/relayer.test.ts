@@ -4,7 +4,7 @@ import { PaperExchange } from "../src/exchange/paper.ts";
 import { usd } from "../src/money.ts";
 import { Relayer } from "../src/relayer/relayer.ts";
 import { PaperTreasury } from "../src/relayer/treasury.ts";
-import { SimVault } from "../src/vault/sim.ts";
+import { SimVault, simCrank } from "../src/vault/sim.ts";
 import { book, contract, ManualFeed, T0, testConfig } from "./helpers.ts";
 
 const cfg = { ...testConfig(), minDrawIntervalMs: 0, workingFloat: usd(500) };
@@ -87,7 +87,7 @@ describe("relayer", () => {
 
 describe("bot and relayer together", () => {
   it("quotes after a draw, cancels on recall, and repays as inventory is worked off", async () => {
-    const bot = new Bot({ cfg, exchange: paper, vault, relayer, treasury, paper, simVault: vault, now: () => now });
+    const bot = new Bot({ cfg, exchange: paper, vault, relayer, treasury, paper, crank: simCrank(vault), now: () => now });
     await bot.refreshSelection();
     await bot.attest();
 

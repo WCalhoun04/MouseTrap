@@ -2,7 +2,7 @@
 
 The market maker and draw relayer from [AGENTS.md](../AGENTS.md) sections 5 and 6. It quotes tight two-sided markets on Gemini Predictions to earn maker rebates, and draws its capital from the escrow vault through the draw gate.
 
-The escrow program is in [`../escrow`](../escrow) but the bot is not connected to it yet. For now the bot runs against a simulated vault that implements the same instructions and the same eight gate conditions.
+By default the bot runs against a simulated vault that implements the same instructions and the same eight gate conditions as the escrow program in [`../escrow`](../escrow). With `--chain` it uses the program itself on a local Solana validator (see [Chain mode](#chain-mode)).
 
 ## Run it
 
@@ -40,6 +40,23 @@ The Operator page has three test controls: force a recall, pause draws, and canc
 
 The local API listens on `127.0.0.1:8787` with no authentication and only runs in test mode.
 
+### Chain mode
+
+Runs the same test mode, but every draw, repayment, profit sweep, NAV report and epoch settlement is a transaction on the escrow program. Needs the Solana CLI and the program built with `cd escrow && anchor build --arch v0`.
+
+```
+npm run localnet                        # terminal 1: validator with the program loaded (resets each start)
+npm run localnet:setup                  # terminal 2: test USDC, keys, initialise, bond, seed deposit
+npm run test-mode -- --chain --offline  # terminal 2: the bot (drop --offline for live Gemini books)
+```
+
+- Keys and the validator ledger live in `bot/.localnet/` (gitignored). The setup script takes the vault limits from the test-mode config, so the bot's gate preview and the program agree.
+- The bot holds the operator, attestor (single-key quorum) and sentinel keys, and acts as the epoch crank.
+- The first draws are held back until the first settlement, because the seed deposit only counts toward NAV once its shares mint.
+- Paper profit has no USDC behind it, so before a repayment or sweep the bot mints any shortfall into the Gemini stand-in account. This only happens on a local validator.
+- Staking from the web app does not work in chain mode yet: deposits and withdrawals need a wallet, which the web app does not connect yet. Health and Operator pages work.
+- `SOLANA_RPC_URL` (default `http://127.0.0.1:8899`) picks the validator. After changing the program, run `npm run idl:sync`.
+
 ### Market maker dashboard
 
 Test mode also serves a dashboard for demos at http://localhost:8788 (`DASHBOARD_PORT`). It shows the live order tape (every order placed, cancelled, filled or rejected), the quote board, PnL and rebates per simulated day, annualised return on drawn capital, the draw gate and the relayer log. It is one self-contained page, `src/server/dashboard.html`, and its port is read-only: it has no routes that move funds or trigger the sentinel controls.
@@ -55,11 +72,12 @@ Test mode also serves a dashboard for demos at http://localhost:8788 (`DASHBOARD
 | Real orders (`src/exchange/gemini.ts`) | Written from the SDK's types. **Never run against an account.** Test it in the sandbox first |
 | Delta hedging | Not built. `Hedger` interface with a no-op; hedge PnL shows as zero |
 | Liquidity rewards | Not modelled. Quotes are flagged when they meet the rules, but no reward is booked |
-| Real USDC transfers between Gemini and the vault | Not built. Simulated in test mode, bookkeeping only in demo and live |
-| Attestors | Not built. The bot posts its own NAV to the simulated vault |
-| Operator performance fee | Not built. Stakers see the full share-price change |
+| On-chain escrow (`src/vault/chain.ts`) | Built for a local validator: draws, repayments, sweeps, NAV, settlement, breakers. Tested end to end by hand |
+| Real USDC transfers between Gemini and the vault | Not built. On a local validator a token account stands in for Gemini; bookkeeping only in demo and live |
+| Attestors | Not built. The bot signs NAV with a single attestor key |
+| Operator performance fee | On-chain only (20% above a high-water mark). The simulated vault shows the full share-price change |
 
-Two shortcuts in the simulated vault differ from the design: deposits mint shares at the current price, not the next epoch's, and instant withdrawals can be claimed without waiting for the epoch to settle.
+Two shortcuts in the simulated vault differ from the design: deposits mint shares at the current price, not the next epoch's, and instant withdrawals can be claimed without waiting for the epoch to settle. The on-chain vault has neither shortcut.
 
 In demo and live mode the daily cycle runs on a fixed interval from start-up, not at 5pm ET.
 
@@ -81,8 +99,10 @@ src/
   execution/             order manager
   pnl/                   fill log, markouts, PnL attribution
   vault/                 VaultClient interface, draw gate, simulated vault
+    chain.ts             the escrow program as a VaultClient (and NAV/epoch crank)
+    idl/                 IDL and types copied from escrow/target by `npm run idl:sync`
+  chain/localnet.ts      local validator keys and setup output
   relayer/               draw, repay and sweep; treasury (the money path)
   server/http.ts         local API for the web app
+scripts/localnet-setup.ts  initialises the vault on a local validator
 ```
-
-To use the on-chain program, write a `VaultClient` for it (`src/vault/types.ts`) from the IDL that `anchor build` writes to `escrow/target/idl/`, and pass it in `cli.ts` in place of the simulated vault. Nothing else in the bot depends on which one it has.

@@ -2,10 +2,29 @@ import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Bot } from "../bot.ts";
 import type { Config } from "../config.ts";
-import { toUsd, usd, USD } from "../money.ts";
-import type { Account, SimVault } from "../vault/sim.ts";
+import { toUsd, usd, USD, type Micros } from "../money.ts";
+import type { Account, Booking, Result, VaultEvent } from "../vault/sim.ts";
+import type { GateResult, VaultState } from "../vault/types.ts";
 
-type Deps = { cfg: Config; vault: SimVault; bot: Bot; reset: () => Promise<void> };
+/** What the API needs from a vault: `SimVault` in test mode, `ChainVault` on a validator. */
+export interface ServedVault {
+  snapshot(): VaultState;
+  sharePrice(): number;
+  instantRoom(): Micros;
+  gate(amount?: Micros): GateResult;
+  readonly history: { t: number; price: number }[];
+  readonly bookings: Booking[];
+  readonly events: VaultEvent[];
+  account(wallet: string): Account;
+  deposit(wallet: string, amount: Micros, acceptRisk: boolean): Result | Promise<Result>;
+  requestWithdraw(wallet: string, amount: Micros): Result<{ settlement: "instant" | "queued" }> | Promise<Result<{ settlement: "instant" | "queued" }>>;
+  claimWithdraw(wallet: string, id: string): Result | Promise<Result>;
+  pause(): void | Promise<void>;
+  resume(): void | Promise<void>;
+  forceRecall(): Result | Promise<Result>;
+}
+
+type Deps = { cfg: Config; vault: ServedVault; bot: Bot; reset: () => Promise<void> };
 
 const iso = (ms: number) => new Date(ms).toISOString();
 
@@ -148,25 +167,25 @@ export function startServer(deps: Deps): Server {
           return send(200, bot.status());
         case "POST /deposit": {
           const body = await readJson(req);
-          return send(200, vault.deposit(wallet(body), amount(body), body.acceptRisk === true));
+          return send(200, await vault.deposit(wallet(body), amount(body), body.acceptRisk === true));
         }
         case "POST /withdraw/request": {
           const body = await readJson(req);
-          return send(200, vault.requestWithdraw(wallet(body), amount(body)));
+          return send(200, await vault.requestWithdraw(wallet(body), amount(body)));
         }
         case "POST /withdraw/claim": {
           const body = await readJson(req);
           if (typeof body.id !== "string") throw new Error("Missing withdrawal id.");
-          return send(200, vault.claimWithdraw(wallet(body), body.id));
+          return send(200, await vault.claimWithdraw(wallet(body), body.id));
         }
         case "POST /sentinel/pause":
-          vault.pause();
+          await vault.pause();
           return send(200, { ok: true });
         case "POST /sentinel/resume":
-          vault.resume();
+          await vault.resume();
           return send(200, { ok: true });
         case "POST /sentinel/recall":
-          return send(200, vault.forceRecall());
+          return send(200, await vault.forceRecall());
         case "POST /operator/stop":
           await bot.setManualStop(true);
           return send(200, { ok: true });

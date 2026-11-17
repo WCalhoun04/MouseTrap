@@ -15,8 +15,7 @@ import { buildInventory, collateral, type Inventory } from "./risk/limits.ts";
 import { desiredQuotes, type Quotes } from "./strategy/quoter.ts";
 import { rebateAccrual } from "./strategy/rebate.ts";
 import { selectContracts } from "./strategy/selector.ts";
-import type { SimVault } from "./vault/sim.ts";
-import type { VaultClient } from "./vault/types.ts";
+import type { VaultClient, VaultCrank } from "./vault/types.ts";
 
 type Parts = {
   cfg: Config;
@@ -24,9 +23,10 @@ type Parts = {
   vault: VaultClient;
   relayer: Relayer;
   treasury: Treasury;
-  /** Present in test mode: lets the bot run the payout and stand in for attestors. */
+  /** Present in test mode: lets the bot run the rebate payout. */
   paper?: PaperExchange;
-  simVault?: SimVault;
+  /** Lets the bot stand in for the attestor and the epoch crank. */
+  crank?: VaultCrank;
   hedger?: Hedger;
   now?: () => number;
   log?: (text: string) => void;
@@ -46,7 +46,7 @@ export class Bot {
   private readonly relayer: Relayer;
   private readonly treasury: Treasury;
   private readonly paper?: PaperExchange;
-  private readonly simVault?: SimVault;
+  private readonly crank?: VaultCrank;
   private readonly hedger: Hedger;
   private readonly now: () => number;
   private readonly log: (text: string) => void;
@@ -81,7 +81,7 @@ export class Bot {
     this.relayer = parts.relayer;
     this.treasury = parts.treasury;
     this.paper = parts.paper;
-    this.simVault = parts.simVault;
+    this.crank = parts.crank;
     this.hedger = parts.hedger ?? new NoopHedger();
     this.now = parts.now ?? Date.now;
     this.log = parts.log ?? (() => {});
@@ -220,11 +220,11 @@ export class Bot {
     }
   }
 
-  /** Stand-in for the attestor quorum: read exchange equity and post it as NAV. */
+  /** Stand-in for the attestor: read exchange equity and post it as NAV. */
   async attest(): Promise<void> {
-    if (!this.simVault) return;
-    this.simVault.submitNav(await this.exchange.equity());
-    this.simVault.tick();
+    if (!this.crank) return;
+    await this.crank.submitNav(await this.exchange.equity());
+    await this.crank.tick();
   }
 
   /** The daily cycle from AGENTS.md section 6, run once per epoch. */
@@ -239,9 +239,15 @@ export class Bot {
     await this.attest();
     const equity = await this.exchange.equity();
     const booked = this.attribution.takeEpoch(equity, this.treasury.netFunded(), this.hedger.pnl());
-    this.simVault?.settleEpoch({ rebates: booked.rebate, rewards: booked.rewards, spread: booked.spread + booked.hedge });
+    if (this.crank) {
+      try {
+        await this.crank.settleEpoch({ rebates: booked.rebate, rewards: booked.rewards, spread: booked.spread + booked.hedge });
+      } catch (err) {
+        this.note(`Epoch settlement failed: ${message(err)}`);
+      }
+    }
     const fees = this.attribution.feesAfterWaiver();
-    const vault = this.simVault?.snapshot();
+    const vault = this.crank ? await this.vault.state() : null;
     this.days.push({
       rebate: booked.rebate,
       total: booked.total,

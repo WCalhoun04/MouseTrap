@@ -53,3 +53,15 @@ export interface VaultClient {
   /** Daily sweep of profit: USDC into the idle account without touching principal. */
   sweepProfit(amount: Micros): Promise<TxResult>;
 }
+
+export type EpochBooking = { rebates: Micros; rewards: Micros; spread: Micros };
+
+/**
+ * The attestor and crank roles the bot stands in for until independent attestors
+ * exist: post NAV, settle the epoch, and run deadline checks.
+ */
+export interface VaultCrank {
+  submitNav(equity: Micros): Promise<void>;
+  settleEpoch(booking: EpochBooking): Promise<void>;
+  tick(): Promise<void>;
+}

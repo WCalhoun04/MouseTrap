@@ -1,7 +1,7 @@
 import type { VaultParams } from "../config.ts";
 import { fmtUsd, type Micros } from "../money.ts";
 import { checkDraw } from "./gate.ts";
-import type { GateResult, Recall, TxResult, VaultClient, VaultState } from "./types.ts";
+import type { GateResult, Recall, TxResult, VaultClient, VaultCrank, VaultState } from "./types.ts";
 
 export type Withdrawal = {
   id: string;
@@ -398,4 +398,12 @@ export class SimVault implements VaultClient {
     this.events.unshift({ at: this.now(), kind, text });
     if (this.events.length > 60) this.events.pop();
   }
+}
+
+export function simCrank(vault: SimVault): VaultCrank {
+  return {
+    submitNav: async (equity) => vault.submitNav(equity),
+    settleEpoch: async (booking) => vault.settleEpoch(booking),
+    tick: async () => vault.tick(),
+  };
 }

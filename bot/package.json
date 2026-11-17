@@ -10,11 +10,17 @@
     "test-mode": "tsx src/cli.ts test",
     "demo": "tsx src/cli.ts demo",
     "live": "tsx src/cli.ts live",
+    "localnet": "solana-test-validator --reset --quiet --ledger .localnet/ledger --bpf-program 2rhxbbbqDtRPfGDAcd4LK7iqbR6Ro58R3QLs1NG9EZfd ../escrow/target/deploy/mousetrap_vault.so",
+    "localnet:setup": "tsx scripts/localnet-setup.ts",
+    "idl:sync": "cp ../escrow/target/idl/mousetrap_vault.json ../escrow/target/types/mousetrap_vault.ts src/vault/idl/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
     "@gemini-markets/sdk": "^0.1.1",
+    "@solana/spl-token": "^0.4.15",
+    "@solana/web3.js": "^1.99.0",
     "dotenv": "^18.0.10",
     "ws": "^8.23.0",
     "zod": "^4.6.7"
