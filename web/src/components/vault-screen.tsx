@@ -209,6 +209,7 @@ function TradePanel() {
       ) : (
         <WithdrawForm key={`${identity.walletId}-${ledgerApi.session}`} />
       )}
+      <Tickets key={`tickets-${identity.walletId}-${ledgerApi.session}`} />
     </section>
   );
 }
@@ -287,8 +288,20 @@ function DepositForm() {
       return;
     }
     setError(null);
-    setNotice(`Deposited ${formatUsd(usdc)}.`);
+    setNotice(
+      ledgerApi.onChain
+        ? `Deposited ${formatUsd(usdc)}. Shares mint when this epoch settles; claim them below.`
+        : `Deposited ${formatUsd(usdc)}.`,
+    );
     setAmount("");
+  }
+
+  async function onFaucet() {
+    if (!ledgerApi.ready || !walletId || !ledgerApi.faucet) return;
+    setNotice("Requesting test SOL and USDC…");
+    const result = await ledgerApi.faucet(walletId);
+    setError(result.ok ? null : result.error);
+    setNotice(result.ok ? "Test USDC is in your wallet." : null);
   }
 
   return (
@@ -307,10 +320,17 @@ function DepositForm() {
       </div>
       <AmountField id="deposit-amount" value={amount} onChange={setAmount} />
       <p className="text-sm text-muted">
-        {shares
-          ? `You receive ${formatShares(shares)} at ${formatUsd(price, 4)} per share.`
-          : `Share price ${formatUsd(price, 4)}.`}
+        {ledgerApi.onChain
+          ? `Shares mint at this epoch's settlement price${shares ? `, about ${formatShares(shares)}` : ""} (now ${formatUsd(price, 4)}).`
+          : shares
+            ? `You receive ${formatShares(shares)} at ${formatUsd(price, 4)} per share.`
+            : `Share price ${formatUsd(price, 4)}.`}
       </p>
+      {ledgerApi.faucet && (
+        <button type="button" onClick={onFaucet} className="self-start font-mono text-xs text-brass hover:underline">
+          Get test USDC (local validator)
+        </button>
+      )}
       {error && (
         <p role="alert" className="text-sm text-danger">
           {error}
@@ -369,7 +389,11 @@ function WithdrawForm() {
       return;
     }
     setError(null);
-    setNotice("Withdrawal requested. Claim it below.");
+    setNotice(
+      ledgerApi.onChain
+        ? "Withdrawal requested. It is priced when this epoch settles; claim it below."
+        : "Withdrawal requested. Claim it below.",
+    );
     setAmount("");
   }
 
@@ -390,7 +414,9 @@ function WithdrawForm() {
       <AmountField id="withdraw-amount" value={amount} onChange={setAmount} />
       {quote && quote.ok && (
         <p className="text-sm leading-6 text-muted">
-          {quote.settlement === "instant"
+          {ledgerApi.onChain
+            ? `Burns about ${formatShares(quote.shares)} now. The USDC is priced at this epoch's settlement and paid from idle USDC; above the idle room of ${formatUsd(quote.instantRoom)} it waits for the operator to repay.`
+            : quote.settlement === "instant"
             ? `${formatUsd(quote.payout)} can be claimed from the idle buffer.`
             : fromBot
               ? `${formatUsd(quote.payout)} is above the idle room of ${formatUsd(quote.instantRoom)}. It opens a recall, and you can claim once the bot has repaid it.`
@@ -410,45 +436,7 @@ function WithdrawForm() {
       >
         Request withdrawal
       </button>
-      {user.withdrawals.length > 0 && (
-        <ul className="border-t border-line">
-          {user.withdrawals.map((withdrawal) => {
-            const payout = withdrawal.shares * price;
-            return (
-              <li
-                key={withdrawal.id}
-                className="flex flex-wrap items-center justify-between gap-3 border-b border-line py-3"
-              >
-                <div>
-                  <p className="font-mono tabular-nums">{formatUsd(payout)}</p>
-                  <p className="text-xs text-faint">
-                    {withdrawal.settlement === "instant" ? "Idle buffer" : "Awaiting recall"} ·{" "}
-                    {formatWhen(withdrawal.requestedAt)} UTC
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!ledgerApi.ready || !walletId) return;
-                    const result = await ledgerApi.claim(walletId, withdrawal.id);
-                    if (!result.ok) {
-                      setError(result.error);
-                      setNotice(null);
-                      return;
-                    }
-                    setError(null);
-                    setNotice(`Claimed ${formatUsd(payout)} into preview USDC.`);
-                  }}
-                  className="rounded-full bg-brass px-4 py-2 text-sm font-medium text-brass-ink hover:bg-[#f0c56e]"
-                >
-                  Claim
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      {queued && (
+      {queued && !ledgerApi.onChain && (
         <p className="text-xs leading-5 text-faint">
           {fromBot
             ? "A queued claim pays once the bot has returned enough USDC. The deadline is 48 hours in the design and ten epochs here."
@@ -456,6 +444,71 @@ function WithdrawForm() {
         </p>
       )}
     </form>
+  );
+}
+
+function Tickets() {
+  const { walletId } = useIdentity();
+  const ledgerApi = useLedger();
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  if (!ledgerApi.ready || !walletId) return null;
+  const user = getUser(ledgerApi.ledger, walletId);
+  if (user.withdrawals.length === 0) return null;
+  const price = sharePrice(ledgerApi.ledger.vault);
+
+  return (
+    <div className="mt-5">
+      <ul className="border-t border-line">
+        {user.withdrawals.map((withdrawal) => {
+          const payout = withdrawal.usdc ?? withdrawal.shares * price;
+          const isDeposit = withdrawal.id.startsWith("deposit:");
+          return (
+            <li
+              key={withdrawal.id}
+              className="flex flex-wrap items-center justify-between gap-3 border-b border-line py-3"
+            >
+              <div>
+                <p className="font-mono tabular-nums">{formatUsd(payout)}</p>
+                <p className="text-xs text-faint">
+                  {withdrawal.note ??
+                    (withdrawal.settlement === "instant" ? "Idle buffer" : "Awaiting recall")}{" "}
+                  · {formatWhen(withdrawal.requestedAt)} UTC
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={withdrawal.claimable === false}
+                onClick={async () => {
+                  if (!ledgerApi.ready || !walletId) return;
+                  const result = await ledgerApi.claim(walletId, withdrawal.id);
+                  if (!result.ok) {
+                    setError(result.error);
+                    setNotice(null);
+                    return;
+                  }
+                  setError(null);
+                  setNotice(
+                    isDeposit
+                      ? "Shares claimed into your wallet."
+                      : `Claimed ${formatUsd(payout)} into ${ledgerApi.onChain ? "your wallet" : "preview USDC"}.`,
+                  );
+                }}
+                className="rounded-full bg-brass px-4 py-2 text-sm font-medium text-brass-ink hover:bg-[#f0c56e] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {isDeposit ? "Claim shares" : "Claim"}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {error && (
+        <p role="alert" className="mt-3 text-sm text-danger">
+          {error}
+        </p>
+      )}
+      {notice && <p className="mt-3 text-sm text-sage">{notice}</p>}
+    </div>
   );
 }
 
@@ -492,18 +545,21 @@ function PositionCard() {
   if (!ledgerApi.ready) return null;
   const user = walletId ? getUser(ledgerApi.ledger, walletId) : null;
   const price = sharePrice(ledgerApi.ledger.vault);
-  const pending = user ? user.withdrawals.reduce((sum, item) => sum + item.shares, 0) : 0;
   const openValue = user ? user.shares * price : 0;
-  const queuedValue = pending * price;
+  const queuedValue = user
+    ? user.withdrawals.reduce((sum, item) => sum + (item.usdc ?? item.shares * price), 0)
+    : 0;
 
   return (
     <section className="rounded-2xl border border-line bg-sheet p-5 sm:p-6">
       <h2 className="font-mono text-[11px] tracking-[0.16em] text-faint uppercase">Position</h2>
       {!walletId || !user ? (
-        <p className="mt-3 text-sm text-muted">Connect a wallet to see shares and preview USDC.</p>
+        <p className="mt-3 text-sm text-muted">
+          Connect a wallet to see shares and {ledgerApi.onChain ? "USDC" : "preview USDC"}.
+        </p>
       ) : (
         <dl className="mt-4 grid grid-cols-2 gap-4">
-          <Stat label="Preview USDC" value={formatUsd(user.cash)} />
+          <Stat label={ledgerApi.onChain ? "Wallet USDC" : "Preview USDC"} value={formatUsd(user.cash)} />
           <Stat label="Position" value={formatUsd(openValue + queuedValue)} />
           <Stat label="Available" value={formatShares(user.shares)} />
           <Stat label="Queued" value={formatUsd(queuedValue)} />

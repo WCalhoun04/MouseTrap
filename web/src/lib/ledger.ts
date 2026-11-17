@@ -23,6 +23,10 @@ export type Withdrawal = {
   costBasis: number;
   requestedAt: string;
   settlement: Settlement;
+  /** On-chain tickets: a fixed USDC value, a status line, and whether it can be claimed now. */
+  usdc?: number;
+  note?: string;
+  claimable?: boolean;
 };
 
 export type ActivityKind = "deposit" | "request" | "claim";
@@ -193,7 +197,7 @@ export type YieldBreakdown = {
 
 export function accountYield(user: UserAccount, price: number): YieldBreakdown {
   const pending = user.withdrawals.reduce(
-    (sum, withdrawal) => sum + (withdrawal.shares * price - withdrawal.costBasis),
+    (sum, withdrawal) => sum + ((withdrawal.usdc ?? withdrawal.shares * price) - withdrawal.costBasis),
     0,
   );
   const open = user.shares * price - user.costBasis;

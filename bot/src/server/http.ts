@@ -4,6 +4,7 @@ import type { Bot } from "../bot.ts";
 import type { Config } from "../config.ts";
 import { toUsd, usd, USD, type Micros } from "../money.ts";
 import type { Account, Booking, Result, VaultEvent } from "../vault/sim.ts";
+import type { ChainInfo } from "../vault/chain.ts";
 import type { GateResult, VaultState } from "../vault/types.ts";
 
 /** What the API needs from a vault: `SimVault` in test mode, `ChainVault` on a validator. */
@@ -15,13 +16,16 @@ export interface ServedVault {
   readonly history: { t: number; price: number }[];
   readonly bookings: Booking[];
   readonly events: VaultEvent[];
-  account(wallet: string): Account;
+  account(wallet: string): Account | Promise<Account>;
   deposit(wallet: string, amount: Micros, acceptRisk: boolean): Result | Promise<Result>;
   requestWithdraw(wallet: string, amount: Micros): Result<{ settlement: "instant" | "queued" }> | Promise<Result<{ settlement: "instant" | "queued" }>>;
   claimWithdraw(wallet: string, id: string): Result | Promise<Result>;
   pause(): void | Promise<void>;
   resume(): void | Promise<void>;
   forceRecall(): Result | Promise<Result>;
+  /** Set when the vault is the on-chain program: the web app signs staker transactions itself. */
+  readonly chain?: ChainInfo;
+  fundWallet?(wallet: string): Promise<Result>;
 }
 
 type Deps = { cfg: Config; vault: ServedVault; bot: Bot; reset: () => Promise<void> };
@@ -44,13 +48,14 @@ function userView(account: Account) {
       costBasis: toUsd(w.costBasis),
       requestedAt: iso(w.requestedAt),
       settlement: w.settlement,
+      ...(w.usdc != null && { usdc: toUsd(w.usdc), note: w.note, claimable: w.claimable }),
     })),
     activity: account.activity.map((a) => ({ id: a.id, kind: a.kind, usdc: toUsd(a.usdc), at: iso(a.at) })),
   };
 }
 
 /** Vault state for the web app. `ledger` matches the app's existing `Ledger` type. */
-export function stateView({ cfg, vault, bot }: Deps, wallet: string | null) {
+export async function stateView({ cfg, vault, bot }: Deps, wallet: string | null) {
   const s = vault.snapshot();
   const shares = s.totalShares / USD;
   const perThousand = (micros: number) => (shares > 0 ? (toUsd(micros) / shares) * 1000 : 0);
@@ -88,6 +93,7 @@ export function stateView({ cfg, vault, bot }: Deps, wallet: string | null) {
         net: perThousand(b.rebates + b.rewards + b.spread),
       })),
     events: vault.events.slice(0, 30),
+    chain: vault.chain ?? null,
     ledger: {
       vault: {
         idleUsdc: toUsd(s.idle),
@@ -98,7 +104,7 @@ export function stateView({ cfg, vault, bot }: Deps, wallet: string | null) {
         paused: s.paused,
         absoluteCap: toUsd(s.absoluteCap),
       },
-      users: wallet ? { [wallet]: userView(vault.account(wallet)) } : {},
+      users: wallet ? { [wallet]: userView(await vault.account(wallet)) } : {},
     },
   };
 }
@@ -162,7 +168,7 @@ export function startServer(deps: Deps): Server {
     try {
       switch (route) {
         case "GET /state":
-          return send(200, stateView(deps, url.searchParams.get("wallet")));
+          return send(200, await stateView(deps, url.searchParams.get("wallet")));
         case "GET /bot":
           return send(200, bot.status());
         case "POST /deposit": {
@@ -177,6 +183,10 @@ export function startServer(deps: Deps): Server {
           const body = await readJson(req);
           if (typeof body.id !== "string") throw new Error("Missing withdrawal id.");
           return send(200, await vault.claimWithdraw(wallet(body), body.id));
+        }
+        case "POST /faucet": {
+          if (!vault.fundWallet) throw new Error("No faucet: the vault is simulated.");
+          return send(200, await vault.fundWallet(wallet(await readJson(req))));
         }
         case "POST /sentinel/pause":
           await vault.pause();
@@ -249,7 +259,10 @@ export function startDashboard(deps: Deps): Server {
       case "/bot":
         return json(deps.bot.status());
       case "/state":
-        return json(stateView(deps, null));
+        return void stateView(deps, null).then(json, (err: Error) => {
+          res.writeHead(500, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: err.message }));
+        });
       default:
         res.writeHead(404, { "content-type": "application/json" });
         res.end(JSON.stringify({ ok: false, error: "Not found." }));

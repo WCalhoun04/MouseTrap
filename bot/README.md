@@ -54,7 +54,8 @@ npm run test-mode -- --chain --offline  # terminal 2: the bot (drop --offline fo
 - The bot holds the operator, attestor (single-key quorum) and sentinel keys, and acts as the epoch crank.
 - The first draws are held back until the first settlement, because the seed deposit only counts toward NAV once its shares mint.
 - Paper profit has no USDC behind it, so before a repayment or sweep the bot mints any shortfall into the Gemini stand-in account. This only happens on a local validator.
-- Staking from the web app does not work in chain mode yet: deposits and withdrawals need a wallet, which the web app does not connect yet. Health and Operator pages work.
+- The web app stakes with your wallet in chain mode. Connect Phantom or Solflare, press "Get test USDC" (2 SOL and 25,000 test USDC from the bot's faucet), then deposit. Shares mint when the epoch settles, about a minute later: claim them under the form. Withdrawals work the same way: request, wait for the settlement, claim. The preview wallet does not work in chain mode.
+- The app sends transactions to the local validator itself; the wallet only signs. If Phantom warns that a transaction may fail, switch it to Solana Localnet (Settings, Developer Settings, Testnet Mode) so it can simulate against the same chain.
 - `SOLANA_RPC_URL` (default `http://127.0.0.1:8899`) picks the validator. After changing the program, run `npm run idl:sync`.
 
 ### Market maker dashboard

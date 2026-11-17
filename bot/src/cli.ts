@@ -50,6 +50,7 @@ async function buildVault(cfg: Config): Promise<{ vault: VaultClient & ServedVau
   }
   const info = readInfo();
   const chain = await ChainVault.connect({
+    faucetAmount: cfg.faucet,
     connection: new Connection(cfg.rpcUrl, "confirmed"),
     operator: loadKey("operator"),
     attestor: loadKey("attestor"),

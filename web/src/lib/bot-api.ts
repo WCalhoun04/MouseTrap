@@ -1,3 +1,4 @@
+import type { ChainInfo } from "@/lib/chain";
 import type { Ledger, LedgerResult } from "@/lib/ledger";
 
 // Client for the market maker bot's local test-mode API (bot/src/server/http.ts).
@@ -44,6 +45,8 @@ export type BotState = {
   /** Per 1,000 mvUSDC, newest first. */
   bookings: Booking[];
   events: { at: number; kind: string; text: string }[];
+  /** Set when the bot runs on the escrow program: staker actions are wallet transactions. */
+  chain: ChainInfo | null;
   ledger: Ledger;
 };
 
@@ -171,6 +174,7 @@ export const botActions = {
   stopQuoting: () => post("/operator/stop"),
   startQuoting: () => post("/operator/start"),
   reset: () => post("/reset"),
+  faucet: (wallet: string) => post("/faucet", { wallet }),
 };
 
 /** Turn an action result into the ledger result the forms already handle. */

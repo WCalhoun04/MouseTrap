@@ -12,7 +12,7 @@
     "live": "tsx src/cli.ts live",
     "localnet": "solana-test-validator --reset --quiet --ledger .localnet/ledger --bpf-program 2rhxbbbqDtRPfGDAcd4LK7iqbR6Ro58R3QLs1NG9EZfd ../escrow/target/deploy/mousetrap_vault.so",
     "localnet:setup": "tsx scripts/localnet-setup.ts",
-    "idl:sync": "cp ../escrow/target/idl/mousetrap_vault.json ../escrow/target/types/mousetrap_vault.ts src/vault/idl/",
+    "idl:sync": "cp ../escrow/target/idl/mousetrap_vault.json ../escrow/target/types/mousetrap_vault.ts src/vault/idl/ && cp ../escrow/target/idl/mousetrap_vault.json ../web/src/lib/idl/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

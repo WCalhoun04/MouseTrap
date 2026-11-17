@@ -23,6 +23,7 @@ import {
   type ReactNode,
 } from "react";
 import { asLedgerResult, botActions, fetchState, type BotState } from "@/lib/bot-api";
+import { chainError, VaultChain, type Signer } from "@/lib/chain";
 import {
   claim,
   deposit,
@@ -110,6 +111,10 @@ type LedgerValue =
       claim: (walletId: string, withdrawalId: string) => Promise<LedgerResult>;
       loadSample: (walletId: string) => LedgerResult;
       reset: () => Promise<void>;
+      /** True when the bot runs on the escrow program and the wallet signs every action. */
+      onChain: boolean;
+      /** Test SOL and USDC for the connected wallet; only on a local validator. */
+      faucet: ((walletId: string) => Promise<LedgerResult>) | null;
     };
 
 const IdentityContext = createContext<IdentityValue | null>(null);
@@ -200,6 +205,15 @@ function LedgerProvider({ children }: { children: ReactNode }) {
   const identity = useContext(IdentityContext);
   const { bot, refresh } = useBotState(identity?.walletId ?? null);
   const [botSession, setBotSession] = useState(0);
+  const { publicKey, signTransaction } = useWallet();
+  const rpcUrl = bot?.chain?.rpcUrl;
+  const programId = bot?.chain?.programId;
+  const usdcMint = bot?.chain?.usdcMint;
+  const faucetOn = bot?.chain?.faucet ?? false;
+  const chain = useMemo(
+    () => (rpcUrl && programId && usdcMint ? new VaultChain({ rpcUrl, programId, usdcMint, faucet: faucetOn }) : null),
+    [rpcUrl, programId, usdcMint, faucetOn],
+  );
 
   const commit = useCallback((next: Ledger, session?: number) => {
     const prev = currentBook();
@@ -211,6 +225,60 @@ function LedgerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<LedgerValue>(() => {
+    if (bot && chain) {
+      // The escrow program holds the funds: the wallet signs, the bot only reports state.
+      const signer: Signer | null =
+        publicKey && signTransaction ? { publicKey, signTransaction } : null;
+      const run = async (walletId: string, action: (wallet: Signer) => Promise<unknown>) => {
+        if (!signer || signer.publicKey.toBase58() !== walletId) {
+          return { ok: false as const, error: "Connect a Solana wallet: this vault is on-chain." };
+        }
+        try {
+          await action(signer);
+        } catch (err) {
+          return { ok: false as const, error: chainError(err) };
+        }
+        await refresh();
+        return { ok: true as const, ledger: bot.ledger };
+      };
+      const user = (walletId: string) => bot.ledger.users[walletId];
+      return {
+        ready: true,
+        ledger: bot.ledger,
+        now: bot.now,
+        session: botSession,
+        source: "bot",
+        bot,
+        onChain: true,
+        deposit: (walletId, amount) =>
+          run(walletId, (wallet) => chain.deposit(wallet, Math.round(amount * 1e6))),
+        requestWithdraw: (walletId, amount) =>
+          run(walletId, (wallet) => {
+            const held = Math.floor((user(walletId)?.shares ?? 0) * 1e6);
+            const value = (held / 1e6) * bot.sharePrice;
+            // Withdrawing (almost) everything burns every share, so no dust is left behind.
+            const shares = amount >= value - 0.01 ? held : Math.min(held, Math.round((amount / bot.sharePrice) * 1e6));
+            if (shares <= 0) throw new Error("You have no shares to withdraw.");
+            return chain.requestWithdraw(wallet, shares);
+          }),
+        claim: (walletId, id) =>
+          run(walletId, (wallet) => {
+            const [kind, epoch] = id.split(":");
+            if (kind === "deposit") return chain.claimDeposit(wallet, Number(epoch));
+            return chain.claimWithdraw(wallet, Number(epoch));
+          }),
+        loadSample: () => ({ ok: false, error: "Samples only load in the browser preview." }),
+        reset: async () => {},
+        faucet: chain.info.faucet
+          ? async (walletId) => {
+              const result = await botActions.faucet(walletId);
+              await refresh();
+              return asLedgerResult(result, bot.ledger);
+            }
+          : null,
+      };
+    }
+
     if (bot) {
       // The bot's simulated escrow is the source of truth; the browser only displays it.
       const run = async (action: ReturnType<typeof botActions.deposit>) => {
@@ -225,6 +293,8 @@ function LedgerProvider({ children }: { children: ReactNode }) {
         session: botSession,
         source: "bot",
         bot,
+        onChain: false,
+        faucet: null,
         deposit: (walletId, amount, acceptRisk) =>
           run(botActions.deposit(walletId, amount, acceptRisk)),
         requestWithdraw: (walletId, amount) => run(botActions.requestWithdraw(walletId, amount)),
@@ -246,6 +316,8 @@ function LedgerProvider({ children }: { children: ReactNode }) {
       session,
       source: "local",
       bot: null,
+      onChain: false,
+      faucet: null,
       deposit: async (walletId, amount, acceptRisk) => {
         const result = deposit(ledger, walletId, amount, Date.now(), acceptRisk);
         if (result.ok) commit(result.ledger);
@@ -268,7 +340,7 @@ function LedgerProvider({ children }: { children: ReactNode }) {
       },
       reset: async () => commit(seedLedger(Date.now()), book.session + 1),
     };
-  }, [book, bot, botSession, commit, refresh]);
+  }, [book, bot, botSession, chain, commit, publicKey, refresh, signTransaction]);
 
   return <LedgerContext.Provider value={value}>{children}</LedgerContext.Provider>;
 }

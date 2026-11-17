@@ -2,11 +2,18 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import anchor from "@coral-xyz/anchor";
 import type { Program as ProgramT } from "@coral-xyz/anchor";
-import { getAccount, mintTo, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import {
+  getAccount,
+  getAssociatedTokenAddressSync,
+  getOrCreateAssociatedTokenAccount,
+  mintTo,
+  TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
 import {
   Connection,
   Ed25519Program,
   Keypair,
+  LAMPORTS_PER_SOL,
   PublicKey,
   SYSVAR_INSTRUCTIONS_PUBKEY,
   SystemProgram,
@@ -14,11 +21,11 @@ import {
 import type { VaultParams } from "../config.ts";
 import { fmtUsd, type Micros } from "../money.ts";
 import { checkDraw } from "./gate.ts";
-import type { Account, Booking, Result, VaultEvent } from "./sim.ts";
+import type { Account, Activity, Booking, Result, VaultEvent, Withdrawal } from "./sim.ts";
 import type { EpochBooking, GateResult, Recall, TxResult, VaultClient, VaultCrank, VaultState } from "./types.ts";
 import type { MousetrapVault } from "./idl/mousetrap_vault.ts";
 
-const { AnchorProvider, BN, Program, Wallet } = anchor;
+const { AnchorProvider, BN, BorshCoder, EventParser, Program, Wallet } = anchor;
 
 const IDL = JSON.parse(readFileSync(new URL("./idl/mousetrap_vault.json", import.meta.url), "utf8")) as MousetrapVault;
 export const PROGRAM_ID = new PublicKey(IDL.address);
@@ -78,9 +85,48 @@ export type ChainVaultOptions = {
    * before a repayment or sweep the mint authority tops the Gemini account up to cover it.
    */
   mintAuthority?: Keypair;
+  /** Test USDC the faucet tops a wallet up to. */
+  faucetAmount?: Micros;
   now?: () => number;
   log?: (text: string) => void;
 };
+
+export type ChainInfo = { rpcUrl: string; programId: string; usdcMint: string; faucet: boolean };
+
+type EpochPrice = { assets: bigint; shares: bigint };
+
+type WalletHistory = {
+  newest: string | undefined;
+  deposits: { epoch: number; amount: number; at: number; sig: string }[];
+  requests: { epoch: number; shares: number; at: number; sig: string }[];
+  claims: { usdc: number; at: number; sig: string }[];
+};
+
+const CLAIM_WITHDRAW = IDL.instructions.find((ix) => ix.name === "claimWithdraw" || (ix.name as string) === "claim_withdraw")!.discriminator;
+
+/** Shares minted for `amount` USDC at a settled epoch; matches `math::shares_for`. */
+function sharesFor(amount: number, p: EpochPrice): number {
+  return Number((BigInt(amount) * (p.shares + BigInt(VIRTUAL_UNITS))) / (p.assets + BigInt(VIRTUAL_UNITS)));
+}
+
+/** USDC paid for `shares` at a settled epoch; matches `math::assets_for`. */
+function assetsFor(shares: number, p: EpochPrice): number {
+  return Number((BigInt(shares) * (p.assets + BigInt(VIRTUAL_UNITS))) / (p.shares + BigInt(VIRTUAL_UNITS)));
+}
+
+function emptyAccount(): Account {
+  return {
+    cash: 0,
+    shares: 0,
+    costBasis: 0,
+    lifetimeDeposited: 0,
+    realizedYield: 0,
+    depositedAt: null,
+    acceptedRisk: false,
+    withdrawals: [],
+    activity: [],
+  };
+}
 
 type Chain = {
   totalShares: number;
@@ -103,6 +149,9 @@ export class ChainVault implements VaultClient, VaultCrank {
   private cache: VaultState;
   private raw: Chain = { totalShares: 0, pendingDeposits: 0, pendingWithdrawShares: 0, reservedWithdrawals: 0, idleBalance: 0 };
   private readonly pda = vaultPdas();
+  private readonly records = new Map<number, EpochPrice>();
+  private readonly histories = new Map<string, WalletHistory>();
+  private readonly parser = new EventParser(PROGRAM_ID, new BorshCoder(IDL));
   private readonly now: () => number;
   private readonly log: (text: string) => void;
 
@@ -198,19 +247,139 @@ export class ChainVault implements VaultClient, VaultCrank {
     return checkDraw(this.cache, this.params, amount, this.now());
   }
 
-  /** Stakers sign their own deposits and withdrawals; the bot holds no staker funds. */
-  account(_wallet: string): Account {
+  /** What the web app needs to build staker transactions itself. */
+  get chain(): ChainInfo {
     return {
-      cash: 0,
-      shares: 0,
-      costBasis: 0,
-      lifetimeDeposited: 0,
-      realizedYield: 0,
-      depositedAt: null,
-      acceptedRisk: false,
-      withdrawals: [],
-      activity: [],
+      rpcUrl: this.opts.connection.rpcEndpoint,
+      programId: PROGRAM_ID.toBase58(),
+      usdcMint: this.config.usdcMint.toBase58(),
+      faucet: this.opts.mintAuthority != null,
     };
+  }
+
+  /**
+   * A staker's position, read from the chain: wallet balances, open tickets, and the
+   * wallet's own deposit and withdrawal transactions for cost basis. Stakers sign their
+   * own transactions; the bot holds no staker funds.
+   */
+  async account(wallet: string): Promise<Account> {
+    let owner: PublicKey;
+    try {
+      owner = new PublicKey(wallet);
+    } catch {
+      return emptyAccount();
+    }
+    const byOwner = [{ memcmp: { offset: 8, bytes: owner.toBase58() } }];
+    const [cash, shares, depositTickets, withdrawTickets, history] = await Promise.all([
+      this.balance(getAssociatedTokenAddressSync(this.config.usdcMint, owner, true)),
+      this.balance(getAssociatedTokenAddressSync(this.pda.shareMint, owner, true)),
+      this.program.account.depositTicket.all(byOwner),
+      this.program.account.withdrawTicket.all(byOwner),
+      this.walletHistory(owner),
+    ]);
+    const epoch = this.cache.epoch;
+    const price = this.sharePrice();
+    const settled = async (e: number) => (e < epoch ? this.epochRecord(e) : null);
+    const at = (list: { epoch: number; at: number }[], e: number) => list.find((x) => x.epoch === e)?.at ?? this.now();
+
+    const tickets: Withdrawal[] = [];
+    for (const { account: t } of depositTickets) {
+      const e = t.epoch.toNumber();
+      const amount = t.amount.toNumber();
+      const record = await settled(e);
+      const minted = record ? sharesFor(amount, record) : Math.round(amount / price);
+      tickets.push({
+        id: `deposit:${e}`,
+        shares: minted,
+        costBasis: 0,
+        requestedAt: at(history.deposits, e),
+        settlement: "instant",
+        quoted: amount,
+        usdc: record ? Math.round(minted * price) : amount,
+        note: record ? "Deposit settled: claim your shares" : `Deposit: shares mint when epoch ${e} settles`,
+        claimable: record != null,
+      });
+    }
+    let openWithdrawals = 0;
+    for (const { account: t } of withdrawTickets) {
+      const e = t.epoch.toNumber();
+      const burned = t.shares.toNumber();
+      const record = await settled(e);
+      const payout = record ? assetsFor(burned, record) : Math.round(burned * price);
+      const claimable = record != null && payout <= this.raw.idleBalance;
+      openWithdrawals += payout;
+      tickets.push({
+        id: `withdraw:${e}`,
+        shares: burned,
+        costBasis: 0,
+        requestedAt: at(history.requests, e),
+        settlement: claimable || !record ? "instant" : "queued",
+        quoted: payout,
+        usdc: payout,
+        note: !record
+          ? `Withdrawal: priced when epoch ${e} settles`
+          : claimable
+            ? "Withdrawal settled: ready to claim"
+            : "Withdrawal settled: waiting for the operator to repay",
+        claimable,
+      });
+    }
+
+    let deposited = 0;
+    for (const d of history.deposits) deposited += d.amount;
+    let withdrawn = 0;
+    const requested: Activity[] = [];
+    for (const r of history.requests) {
+      const record = await settled(r.epoch);
+      const payout = record ? assetsFor(r.shares, record) : Math.round(r.shares * price);
+      withdrawn += payout;
+      requested.push({ id: `r-${r.sig}`, kind: "request", usdc: payout, at: r.at });
+    }
+    const activity: Activity[] = [
+      ...history.deposits.map((d) => ({ id: `d-${d.sig}`, kind: "deposit" as const, usdc: d.amount, at: d.at })),
+      ...requested,
+      ...history.claims.map((c) => ({ id: `c-${c.sig}`, kind: "claim" as const, usdc: c.usdc, at: c.at })),
+    ]
+      .sort((a, b) => b.at - a.at)
+      .slice(0, 12);
+
+    return {
+      cash,
+      shares,
+      costBasis: 0,
+      lifetimeDeposited: deposited,
+      // Chosen so open value + tickets + realised equals value held and paid out less deposits.
+      realizedYield: withdrawn - openWithdrawals - deposited,
+      depositedAt: history.deposits.length > 0 ? Math.min(...history.deposits.map((d) => d.at)) : null,
+      acceptedRisk: true,
+      withdrawals: tickets,
+      activity,
+    };
+  }
+
+  /** Localnet only: SOL for fees and test USDC up to the faucet amount. */
+  async fundWallet(wallet: string): Promise<Result> {
+    const { connection, operator, mintAuthority } = this.opts;
+    if (!mintAuthority) return { ok: false, error: "This cluster has no test USDC faucet." };
+    let owner: PublicKey;
+    try {
+      owner = new PublicKey(wallet);
+    } catch {
+      return { ok: false, error: "Not a Solana address." };
+    }
+    try {
+      if ((await connection.getBalance(owner)) < LAMPORTS_PER_SOL) {
+        const sig = await connection.requestAirdrop(owner, 2 * LAMPORTS_PER_SOL);
+        await connection.confirmTransaction(sig, "confirmed");
+      }
+      const ata = await getOrCreateAssociatedTokenAccount(connection, operator, this.config.usdcMint, owner, true);
+      const top = (this.opts.faucetAmount ?? 25_000 * 1_000_000) - Number(ata.amount);
+      if (top > 0) await mintTo(connection, operator, this.config.usdcMint, ata.address, mintAuthority, top);
+      this.event("faucet", `Faucet sent test USDC to ${wallet.slice(0, 4)}…${wallet.slice(-4)}`);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: txError(err) };
+    }
   }
 
   async deposit(): Promise<Result> {
@@ -455,6 +624,65 @@ export class ChainVault implements VaultClient, VaultCrank {
       absoluteCap: this.config.absoluteCap,
     };
     return this.snapshot();
+  }
+
+  private async balance(account: PublicKey): Promise<number> {
+    try {
+      return Number((await getAccount(this.opts.connection, account, "confirmed")).amount);
+    } catch {
+      return 0;
+    }
+  }
+
+  /** Epoch records never change once written. */
+  private async epochRecord(epoch: number): Promise<EpochPrice | null> {
+    const hit = this.records.get(epoch);
+    if (hit) return hit;
+    const record = await this.program.account.epochRecord.fetchNullable(this.pda.epochRecord(epoch));
+    if (!record) return null;
+    const price = { assets: BigInt(record.assets.toString()), shares: BigInt(record.shares.toString()) };
+    this.records.set(epoch, price);
+    return price;
+  }
+
+  /** A wallet's vault deposits, withdrawal requests and claims, read incrementally from its transactions. */
+  private async walletHistory(owner: PublicKey): Promise<WalletHistory> {
+    const key = owner.toBase58();
+    const known = this.histories.get(key) ?? { newest: undefined, deposits: [], requests: [], claims: [] };
+    this.histories.set(key, known);
+    const { connection } = this.opts;
+    const sigs = await connection.getSignaturesForAddress(owner, { until: known.newest, limit: 1000 }, "confirmed");
+    if (sigs.length === 0) return known;
+    known.newest = sigs[0]!.signature;
+    const live = sigs.filter((s) => s.err == null).map((s) => s.signature);
+    const txs = live.length
+      ? await connection.getTransactions(live, { commitment: "confirmed", maxSupportedTransactionVersion: 0 })
+      : [];
+    txs.forEach((tx, i) => {
+      if (!tx?.meta || tx.meta.err) return;
+      const sig = live[i]!;
+      const at = (tx.blockTime ?? Math.floor(this.now() / 1000)) * 1000;
+      for (const event of this.parser.parseLogs(tx.meta.logMessages ?? [])) {
+        const data = event.data as { owner: PublicKey; epoch: { toNumber(): number }; amount?: { toNumber(): number }; shares?: { toNumber(): number } };
+        if (!data.owner?.equals?.(owner)) continue;
+        if (event.name === "Deposited" && data.amount) {
+          known.deposits.push({ epoch: data.epoch.toNumber(), amount: data.amount.toNumber(), at, sig });
+        } else if (event.name === "WithdrawRequested" && data.shares) {
+          known.requests.push({ epoch: data.epoch.toNumber(), shares: data.shares.toNumber(), at, sig });
+        }
+      }
+      const message = tx.transaction.message;
+      const keys = message.staticAccountKeys;
+      const claimed = message.compiledInstructions.some(
+        (ix) => keys[ix.programIdIndex]?.equals(PROGRAM_ID) && CLAIM_WITHDRAW.every((b, j) => ix.data[j] === b),
+      );
+      if (claimed) {
+        const usdcOf = (rows: typeof tx.meta.postTokenBalances) =>
+          Number(rows?.find((r) => r.owner === key && r.mint === this.config.usdcMint.toBase58())?.uiTokenAmount.amount ?? 0);
+        known.claims.push({ usdc: usdcOf(tx.meta.postTokenBalances) - usdcOf(tx.meta.preTokenBalances), at, sig });
+      }
+    });
+    return known;
   }
 
   /** Cluster time in seconds; NAV timestamps must not run ahead of it. */

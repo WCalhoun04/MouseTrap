@@ -12,6 +12,10 @@ export type Withdrawal = {
   settlement: "instant" | "queued";
   /** USDC value when requested; what the queue reserves. */
   quoted: Micros;
+  /** On-chain tickets: a fixed USDC value, a status line, and whether it can be claimed now. */
+  usdc?: Micros;
+  note?: string;
+  claimable?: boolean;
 };
 
 export type Activity = { id: string; kind: "deposit" | "request" | "claim"; usdc: Micros; at: number };

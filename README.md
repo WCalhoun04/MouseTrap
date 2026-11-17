@@ -10,4 +10,4 @@ A maker-rebate vault: stakers deposit USDC on Solana, and an operator draws it, 
 
 Start the bot first, then the web app: the web pages read live state from the bot when it is running and fall back to a browser-only preview when it is not.
 
-The bot can run against the escrow program on a local validator (`--chain`, see [bot/README.md](bot/README.md#chain-mode)). The web app does not connect a wallet yet, so staking from it only works against the simulated vault.
+The bot can run against the escrow program on a local validator (`--chain`, see [bot/README.md](bot/README.md#chain-mode)). In that mode the web app stakes with your wallet: deposits, withdrawals and claims are transactions you sign.
