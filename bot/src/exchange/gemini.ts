@@ -45,6 +45,7 @@ export class GeminiExchange implements Exchange {
     env: "production" | "sandbox",
     private readonly apiKey: string,
     private readonly apiSecret: string,
+    private readonly nonceMode: "time-based" | "monotonic" = "time-based",
   ) {
     this.env = env;
     this.source = env;
@@ -56,12 +57,12 @@ export class GeminiExchange implements Exchange {
     await this.feed.start();
     this.client = await createClient({
       env: this.env,
-      auth: new HmacAuth({ apiKey: this.apiKey, apiSecret: this.apiSecret }),
+      auth: new HmacAuth({ apiKey: this.apiKey, apiSecret: this.apiSecret, nonceMode: this.nonceMode }),
     });
 
     // Gemini requires the Predictions terms to be accepted before the first order.
-    const terms = (await this.client.predictions.getPredictionMarketsTermsStatus()) as { accepted?: boolean };
-    if (terms.accepted === false) await this.client.predictions.acceptPredictionMarketsTerms();
+    const terms = (await this.client.predictions.getPredictionMarketsTermsStatus()) as { hasAcceptedLatest?: boolean };
+    if (!terms.hasAcceptedLatest) await this.client.predictions.acceptPredictionMarketsTerms();
 
     const updates = this.client.websocket.private.orders({ scope: "account" });
     updates.on("message", (m) => this.onOrderUpdate(m as unknown as Record<string, unknown>));
@@ -110,30 +111,43 @@ export class GeminiExchange implements Exchange {
       return { ...base, side: "buy" as const, outcome: "no" as const, price: price(100 - order.price) };
     });
 
-    const response = (await client.predictions.placeOrderBatch({ orders: body })) as {
-      results?: { orderId?: bigint | number | string; status?: string; error?: string; message?: string }[];
-    };
-
-    return orders.map((order, index) => {
-      const result = response.results?.[index];
-      if (!result || result.orderId == null || result.status === "cancelled") {
-        return { ok: false, clientId: order.clientId, reason: result?.error ?? result?.message ?? "MakerOrCancelWouldTake" };
-      }
-      const orderId = String(result.orderId);
-      this.orders.set(orderId, { symbol: order.symbol, side: order.side, price: order.price, qty: order.qty, filled: 0 });
-      return { ok: true, clientId: order.clientId, orderId };
-    });
+    // One request per order: the batch endpoints answer 503 in the sandbox.
+    return Promise.all(
+      orders.map(async (order, index): Promise<PlaceResult> => {
+        try {
+          const result = (await client.predictions.placeOrder(body[index]!)) as { orderId?: bigint | string; status?: string };
+          if (result.orderId == null || result.status === "cancelled") {
+            return { ok: false, clientId: order.clientId, reason: "MakerOrCancelWouldTake" };
+          }
+          const orderId = String(result.orderId);
+          this.orders.set(orderId, { symbol: order.symbol, side: order.side, price: order.price, qty: order.qty, filled: 0 });
+          return { ok: true, clientId: order.clientId, orderId };
+        } catch (err) {
+          return { ok: false, clientId: order.clientId, reason: err instanceof Error ? err.message : String(err) };
+        }
+      }),
+    );
   }
 
   async cancel(orderIds: string[]): Promise<void> {
-    if (orderIds.length === 0) return;
-    await this.need().predictions.cancelOrderBatch({ orderIds });
-    orderIds.forEach((id) => this.orders.delete(id));
+    const client = this.need();
+    await Promise.all(
+      orderIds.map(async (id) => {
+        await client.predictions.cancelOrder({ orderId: BigInt(id) });
+        this.orders.delete(id);
+      }),
+    );
   }
 
+  /** Cancels every open order on the account, including ones this process did not place. */
   async cancelAll(): Promise<void> {
     if (!this.client) return;
-    await this.client.websocket.private.cancelAllOrders({ confirm: true });
+    const ids: string[] = [];
+    for await (const order of this.client.predictions.iterateActiveOrders()) {
+      const id = (order as { orderId?: bigint | string }).orderId;
+      if (id != null) ids.push(String(id));
+    }
+    await this.cancel(ids);
     this.orders.clear();
   }
 

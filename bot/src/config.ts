@@ -80,6 +80,8 @@ export type Config = {
   faucet: Micros;
   apiKey?: string;
   apiSecret?: string;
+  /** Must match the "time-based nonce" setting chosen when the API key was created. */
+  nonceMode: "time-based" | "monotonic";
   dataDir: string;
 };
 
@@ -95,6 +97,7 @@ const Env = z.object({
   INFORMED_MOVE_CENTS: z.coerce.number().min(0).max(50).default(2),
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_API_SECRET: z.string().optional(),
+  GEMINI_NONCE: z.enum(["time-based", "monotonic"]).default("time-based"),
   MODE: z.string().optional(),
   SOLANA_RPC_URL: z.string().default("http://127.0.0.1:8899"),
   I_UNDERSTAND_LIVE_TRADING: z.string().optional(),
@@ -186,6 +189,7 @@ export function loadConfig(
     faucet: usd(25_000),
     apiKey: e.GEMINI_API_KEY,
     apiSecret: e.GEMINI_API_SECRET,
+    nonceMode: e.GEMINI_NONCE,
     dataDir: "data",
   };
 }

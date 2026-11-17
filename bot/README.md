@@ -20,7 +20,7 @@ Then, in another terminal, start the web app (`cd web && npm install && npm run 
 | --- | --- | --- | --- |
 | `npm run test-mode` | Live Gemini order books, paper fills | Fake USDC | Internet |
 | `npm run test-mode -- --offline` | Generated books and takers | Fake USDC | Nothing |
-| `npm run demo` | Gemini sandbox, real orders | Sandbox funds | Sandbox API key in `.env` |
+| `npm run demo` | Gemini sandbox, real orders | Sandbox funds | Sandbox API key in `.env` (`GEMINI_NONCE` must match the key) |
 | `npm run live` | Gemini production | Real money | API key, `MODE=live`, `I_UNDERSTAND_LIVE_TRADING=yes` |
 
 `npm test` runs the unit tests. `npm run typecheck` checks types.
@@ -69,7 +69,7 @@ Test mode also serves a dashboard for demos at http://localhost:8788 (`DASHBOARD
 | Rebate maths | Built; reproduces Gemini's worked examples in AGENTS.md section 2 |
 | Draw gate, simulated vault, relayer | Built and unit-tested |
 | Live Gemini market data | Built; checked against the production API on 2026-11-16 |
-| Real orders (`src/exchange/gemini.ts`) | Written from the SDK's types. **Never run against an account.** Test it in the sandbox first |
+| Real orders (`src/exchange/gemini.ts`) | Place, maker-or-cancel rejection, cancel and cancel-all checked in the Gemini sandbox on 2026-11-16. Fill tracking from the order WebSocket is not yet seen working |
 | Delta hedging | Not built. `Hedger` interface with a no-op; hedge PnL shows as zero |
 | Liquidity rewards | Not modelled. Quotes are flagged when they meet the rules, but no reward is booked |
 | On-chain escrow (`src/vault/chain.ts`) | Built for a local validator: draws, repayments, sweeps, NAV, settlement, breakers. Tested end to end by hand |

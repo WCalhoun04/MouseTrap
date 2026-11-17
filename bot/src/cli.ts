@@ -73,7 +73,7 @@ async function build(cfg: Config) {
     exchange = paper;
     treasury = new PaperTreasury(paper);
   } else {
-    exchange = new GeminiExchange(cfg.mode === "live" ? "production" : "sandbox", cfg.apiKey!, cfg.apiSecret!);
+    exchange = new GeminiExchange(cfg.mode === "live" ? "production" : "sandbox", cfg.apiKey!, cfg.apiSecret!, cfg.nonceMode);
     treasury = new NotionalTreasury(exchange);
   }
 
