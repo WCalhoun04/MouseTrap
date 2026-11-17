@@ -56,7 +56,7 @@ async function buildVault(cfg: Config): Promise<{ vault: VaultClient & ServedVau
     attestor: loadKey("attestor"),
     sentinel: loadKey("sentinel"),
     gemini: loadKey("gemini"),
-    // Only a local validator lets the bot mint USDC to stand in for paper profit.
+    // Test mode owns the test USDC mint, so it can mint to stand in for paper profit.
     mintAuthority: cfg.mode === "test" ? loadKey("owner") : undefined,
   });
   log(`Escrow program ${info.programId} on ${cfg.rpcUrl}.`);

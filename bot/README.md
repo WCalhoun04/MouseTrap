@@ -58,6 +58,19 @@ npm run test-mode -- --chain --offline  # terminal 2: the bot (drop --offline fo
 - The app sends transactions to the local validator itself; the wallet only signs. If Phantom warns that a transaction may fail, switch it to Solana Localnet (Settings, Developer Settings, Testnet Mode) so it can simulate against the same chain.
 - `SOLANA_RPC_URL` (default `http://127.0.0.1:8899`) picks the validator. After changing the program, run `npm run idl:sync`.
 
+### Devnet
+
+The program is deployed on devnet at `2rhxbbbqDtRPfGDAcd4LK7iqbR6Ro58R3QLs1NG9EZfd`, with a vault initialised on 2026-11-17 (test USDC mint `BkXxTg3PRX63oTEuXsiBThrsXitKa9fcXHjVFjE6zC6M`). Its keys are in `bot/.devnet/` on the machine that ran setup; only that machine can run the operator bot.
+
+```
+SOLANA_RPC_URL=<devnet RPC> npm run localnet:setup               # once; funded from your Solana CLI wallet
+SOLANA_RPC_URL=<devnet RPC> npm run test-mode -- --chain --offline
+```
+
+- Use a dedicated devnet RPC (a free Helius or QuickNode key). The public `api.devnet.solana.com` rate-limits the bot's NAV reports and settlements.
+- Epochs are two minutes on devnet (`EPOCH_SECONDS` overrides), because every settlement pays rent for an epoch record. The operator key pays about 0.5 SOL a day of fees and rent while the bot runs.
+- The faucet sends 0.02 SOL from the operator key and tops the wallet up to 25,000 test USDC.
+
 ### Market maker dashboard
 
 Test mode also serves a dashboard for demos at http://localhost:8788 (`DASHBOARD_PORT`). It shows the live order tape (every order placed, cancelled, filled or rejected), the quote board, PnL and rebates per simulated day, annualised return on drawn capital, the draw gate and the relayer log. It is one self-contained page, `src/server/dashboard.html`, and its port is read-only: it has no routes that move funds or trigger the sentinel controls.

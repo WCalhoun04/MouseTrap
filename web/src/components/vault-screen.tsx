@@ -328,7 +328,7 @@ function DepositForm() {
       </p>
       {ledgerApi.faucet && (
         <button type="button" onClick={onFaucet} className="self-start font-mono text-xs text-brass hover:underline">
-          Get test USDC (local validator)
+          Get test SOL and USDC
         </button>
       )}
       {error && (

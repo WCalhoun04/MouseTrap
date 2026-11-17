@@ -1,5 +1,5 @@
 /**
- * Initialises the escrow program on a local validator for `npm run test-mode -- --chain`:
+ * Initialises the escrow program on a local validator (or devnet, with SOLANA_RPC_URL) for `npm run test-mode -- --chain`:
  * a test USDC mint, a single attestor, the operator's bond and a seed deposit, with
  * limits taken from the bot's test-mode config so the bot and the program agree.
  *
@@ -15,16 +15,32 @@ import {
   mintTo,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
-import { Connection, LAMPORTS_PER_SOL, PublicKey, SystemProgram, type Keypair } from "@solana/web3.js";
+import {
+  Connection,
+  Keypair,
+  LAMPORTS_PER_SOL,
+  PublicKey,
+  sendAndConfirmTransaction,
+  SystemProgram,
+  Transaction,
+} from "@solana/web3.js";
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { loadConfig } from "../src/config.ts";
-import { loadOrCreateKey, writeInfo } from "../src/chain/localnet.ts";
+import { clusterDir, isLocalCluster, loadOrCreateKey, writeInfo } from "../src/chain/localnet.ts";
 import { fmtUsd } from "../src/money.ts";
 import { PROGRAM_ID, vaultPdas } from "../src/vault/chain.ts";
 import type { MousetrapVault } from "../src/vault/idl/mousetrap_vault.ts";
 
 const { AnchorProvider, BN, Program, Wallet } = anchor;
 const OPERATOR_USDC = 50_000_000_000;
+const DEVNET_OPERATOR_SOL = 1.5;
+
+/** The Solana CLI's default keypair, or SOLANA_PAYER. */
+function cliWallet(): Keypair {
+  const path = process.env.SOLANA_PAYER ?? `${homedir()}/.config/solana/id.json`;
+  return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(path, "utf8")) as number[]));
+}
 
 async function main() {
   const cfg = loadConfig("test", { chain: true });
@@ -49,16 +65,53 @@ async function main() {
   };
   const pda = vaultPdas();
   if (await connection.getAccountInfo(pda.config)) {
-    console.log("The vault is already initialised on this validator. Restart `npm run localnet` (it resets) to start over.");
+    console.log(
+      isLocalCluster(cfg.rpcUrl)
+        ? "The vault is already initialised on this validator. Restart `npm run localnet` (it resets) to start over."
+        : `The vault is already initialised on ${cfg.rpcUrl}. Its keys are in ${clusterDir().pathname}.`,
+    );
     return;
   }
 
-  for (const key of [keys.owner, keys.operator, keys.sentinel, keys.gemini, keys.seedStaker]) {
-    const sig = await connection.requestAirdrop(key.publicKey, 100 * LAMPORTS_PER_SOL);
-    await connection.confirmTransaction(sig, "confirmed");
+  if (isLocalCluster(cfg.rpcUrl)) {
+    for (const key of [keys.owner, keys.operator, keys.sentinel, keys.gemini, keys.seedStaker]) {
+      const sig = await connection.requestAirdrop(key.publicKey, 100 * LAMPORTS_PER_SOL);
+      await connection.confirmTransaction(sig, "confirmed");
+    }
+  } else {
+    // Devnet rate-limits airdrops, so the Solana CLI wallet pays. The operator signs
+    // every NAV report and settlement, and funds the faucet for new stakers.
+    const payer = cliWallet();
+    const wanted: [Keypair, number][] = [
+      [keys.owner, 0.1],
+      [keys.operator, DEVNET_OPERATOR_SOL],
+      [keys.sentinel, 0.02],
+      [keys.gemini, 0.05],
+      [keys.seedStaker, 0.02],
+    ];
+    // A rerun after a failed setup only tops up keys that are still short.
+    const budget: [Keypair, number][] = [];
+    for (const [key, sol] of wanted) {
+      const held = (await connection.getBalance(key.publicKey)) / LAMPORTS_PER_SOL;
+      if (held < sol / 2) budget.push([key, sol - held]);
+    }
+    const need = budget.reduce((sum, [, sol]) => sum + sol, 0);
+    const have = (await connection.getBalance(payer.publicKey)) / LAMPORTS_PER_SOL;
+    if (have < need + 0.01) {
+      throw new Error(`${payer.publicKey.toBase58()} has ${have.toFixed(3)} SOL; setup needs ${need.toFixed(2)}. Get devnet SOL at https://faucet.solana.com.`);
+    }
+    const tx = new Transaction();
+    if (budget.length === 0) tx.add(SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: payer.publicKey, lamports: 0 }));
+    for (const [key, sol] of budget) {
+      tx.add(SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: key.publicKey, lamports: Math.round(sol * LAMPORTS_PER_SOL) }));
+    }
+    await sendAndConfirmTransaction(connection, tx, [payer], { commitment: "confirmed" });
+    console.log(`Funded the vault keys with ${need.toFixed(2)} SOL from ${payer.publicKey.toBase58()}.`);
   }
 
-  const mint = await createMint(connection, keys.owner, keys.owner.publicKey, null, 6, keys.usdcMint);
+  const mint = (await connection.getAccountInfo(keys.usdcMint.publicKey))
+    ? keys.usdcMint.publicKey
+    : await createMint(connection, keys.owner, keys.owner.publicKey, null, 6, keys.usdcMint);
   const ata = async (owner: Keypair) =>
     (await getOrCreateAssociatedTokenAccount(connection, keys.owner, mint, owner.publicKey)).address;
   const geminiUsdc = await ata(keys.gemini);
@@ -156,7 +209,8 @@ async function main() {
   console.log(`  Gemini account ${geminiUsdc.toBase58()} (draw destination)`);
   console.log(`  bond ${fmtUsd(cfg.seedBond)}, seed deposit ${fmtUsd(cfg.seedDeposits)} (shares mint at the first settlement)`);
   console.log(`  operator USDC  ${getAssociatedTokenAddressSync(mint, keys.operator.publicKey).toBase58()}`);
-  console.log("Now run: npm run test-mode -- --chain");
+  if (!isLocalCluster(cfg.rpcUrl)) console.log(`Keys are in ${clusterDir().pathname}. Back them up: they run this vault.`);
+  console.log(`Now run: ${isLocalCluster(cfg.rpcUrl) ? "" : `SOLANA_RPC_URL=${cfg.rpcUrl} `}npm run test-mode -- --chain`);
 }
 
 main().catch((err) => {

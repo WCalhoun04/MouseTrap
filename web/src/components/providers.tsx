@@ -112,7 +112,7 @@ type LedgerValue =
       reset: () => Promise<void>;
       /** True when the bot runs on the escrow program and the wallet signs every action. */
       onChain: boolean;
-      /** Test SOL and USDC for the connected wallet; only on a local validator. */
+      /** Test SOL and USDC for the connected wallet; only when the bot owns the test USDC mint. */
       faucet: ((walletId: string) => Promise<LedgerResult>) | null;
     };
 

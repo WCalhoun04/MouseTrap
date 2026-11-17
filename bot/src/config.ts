@@ -123,7 +123,9 @@ export function loadConfig(
 
   // Test mode squeezes the daily cycle into a short epoch so it can be shown on stage.
   const test = mode === "test";
-  const epochMs = e.EPOCH_SECONDS ? e.EPOCH_SECONDS * 1000 : test ? 60_000 : DAY_MS;
+  // Each settlement writes an epoch record, which costs rent on devnet: settle less often there.
+  const remote = Boolean(flags.chain) && !/localhost|127\.0\.0\.1/.test(e.SOLANA_RPC_URL);
+  const epochMs = e.EPOCH_SECONDS ? e.EPOCH_SECONDS * 1000 : test ? (remote ? 120_000 : 60_000) : DAY_MS;
   const navIntervalMs = test ? Math.min(5_000, epochMs / 4) : 3_600_000;
 
   return {

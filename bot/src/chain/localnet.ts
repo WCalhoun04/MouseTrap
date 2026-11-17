@@ -1,10 +1,25 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { Keypair, PublicKey } from "@solana/web3.js";
 
-/** Keys and addresses for a local validator, written by `npm run localnet:setup`. Gitignored. */
-export const LOCALNET_DIR = new URL("../../.localnet/", import.meta.url);
-const KEYS_DIR = new URL("keys/", LOCALNET_DIR);
-const INFO_FILE = new URL("vault.json", LOCALNET_DIR);
+/** True for a validator on this machine; anything else (devnet) gets its own keys. */
+export function isLocalCluster(rpcUrl: string = clusterUrl()): boolean {
+  return /localhost|127\.0\.0\.1/.test(rpcUrl);
+}
+
+export function clusterUrl(): string {
+  return process.env.SOLANA_RPC_URL ?? "http://127.0.0.1:8899";
+}
+
+/**
+ * Keys and addresses written by `npm run localnet:setup`: `.localnet/` for a local
+ * validator, `.devnet/` otherwise. Gitignored; back up `.devnet/`, it holds the
+ * operator, attestor and sentinel keys of the shared devnet vault.
+ */
+export function clusterDir(): URL {
+  return new URL(isLocalCluster() ? "../../.localnet/" : "../../.devnet/", import.meta.url);
+}
+const keysDir = () => new URL("keys/", clusterDir());
+const infoFile = () => new URL("vault.json", clusterDir());
 
 export const KEY_NAMES = ["owner", "operator", "sentinel", "attestor", "gemini", "feeRecipient", "seedStaker", "usdcMint"] as const;
 export type KeyName = (typeof KEY_NAMES)[number];
@@ -18,13 +33,13 @@ export type LocalnetInfo = {
 };
 
 export function keyFile(name: KeyName): URL {
-  return new URL(`${name}.json`, KEYS_DIR);
+  return new URL(`${name}.json`, keysDir());
 }
 
 export function loadOrCreateKey(name: KeyName): Keypair {
   const file = keyFile(name);
   if (existsSync(file)) return loadKey(name);
-  mkdirSync(KEYS_DIR, { recursive: true });
+  mkdirSync(keysDir(), { recursive: true });
   const key = Keypair.generate();
   writeFileSync(file, JSON.stringify([...key.secretKey]), { mode: 0o600 });
   return key;
@@ -37,15 +52,15 @@ export function loadKey(name: KeyName): Keypair {
 }
 
 export function writeInfo(info: LocalnetInfo): void {
-  mkdirSync(LOCALNET_DIR, { recursive: true });
-  writeFileSync(INFO_FILE, `${JSON.stringify(info, null, 2)}\n`);
+  mkdirSync(clusterDir(), { recursive: true });
+  writeFileSync(infoFile(), `${JSON.stringify(info, null, 2)}\n`);
 }
 
 export function readInfo(): LocalnetInfo {
-  if (!existsSync(INFO_FILE)) {
-    throw new Error("No local vault found. Start `npm run localnet`, then run `npm run localnet:setup`.");
+  if (!existsSync(infoFile())) {
+    throw new Error(`No vault set up for ${clusterUrl()}. Run \`npm run localnet:setup\` with the same SOLANA_RPC_URL.`);
   }
-  return JSON.parse(readFileSync(INFO_FILE, "utf8")) as LocalnetInfo;
+  return JSON.parse(readFileSync(infoFile(), "utf8")) as LocalnetInfo;
 }
 
 export function pubkey(text: string): PublicKey {
