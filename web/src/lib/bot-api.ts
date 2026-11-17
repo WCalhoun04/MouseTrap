@@ -205,8 +205,8 @@ export function splitByBookings(total: number, bookings: Booking[]) {
 }
 
 export function sourceLabel(state: Pick<BotState, "source" | "dayFlow">): string {
-  const market = state.source === "gemini" ? "live Gemini prices" : "synthetic market";
+  const market = state.source === "gemini" ? "Live Gemini prices" : "Synthetic market";
   return state.dayFlow
-    ? `Test mode: ${market}, each epoch replays one day of volume, fake funds`
-    : `Test mode: ${market}, fake funds`;
+    ? `${market}, each epoch replays one day of volume, simulated funds`
+    : `${market}, simulated funds`;
 }

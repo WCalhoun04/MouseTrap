@@ -228,7 +228,7 @@
     var d = bot.daily || { days: 0 };
     var replay = bot.dayFlow;
     var per = replay ? "day" : "epoch";
-    var days = d.days + (replay ? " simulated day" : " epoch") + (d.days === 1 ? "" : "s");
+    var days = d.days + (replay ? " day" : " epoch") + (d.days === 1 ? "" : "s");
     var pctOf = function (v) { return v == null ? "—" : (v >= 0 ? "+" : "") + (v * 100).toFixed(1) + "%"; };
     $("kpis").innerHTML =
       kpi("PnL per " + per, d.avgPnl == null ? "—" : usd(d.avgPnl), d.days ? "average over " + days : "first " + per + " not settled yet", tone(d.avgPnl || 0)) +
@@ -244,7 +244,7 @@
   function renderFoot(bot) {
     var f = bot.flow;
     $("foot").textContent = bot.dayFlow && f
-      ? "Time-compressed simulation with fake funds. Each " + f.epochSeconds + "-second epoch replays one day of each contract's real 24-hour Gemini volume against " +
+      ? "Time-compressed: each " + f.epochSeconds + "-second epoch replays one day of each contract's real 24-hour Gemini volume against " +
         (bot.source === "gemini" ? "live Gemini prices" : "a generated market") + ", so per-day figures approximate a real day. " +
         "Assumed, not measured: " + Math.round(f.captureShare * 100) + "% of taker flow reaches the bot, " + Math.round(f.informedShare * 100) +
         "% of takers are informed and cost " + f.informedMoveCents + "¢ a contract, and an event's volume is split evenly across its contracts. Rebates use Gemini's published formula. Return is on the whole vault: volume, not capital, is the limit, so more deposits would lower it. Liquidity rewards, hedging and the operator's fee are not included."

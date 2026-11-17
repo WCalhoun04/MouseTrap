@@ -6,7 +6,6 @@ import {
   BOND_MIN,
   BUFFER_RATIO,
   dailyBook,
-  drawStatus,
   DRAWN_NAV_MAX,
   HEALTH_MIN,
   readings,
@@ -23,10 +22,7 @@ export function HealthScreen() {
   const { ledger, now, bot } = ledgerApi;
   const local = readings(ledger.vault, now);
   const view = bot ? { ...local, epoch: bot.epoch, navAt: bot.navAt, instantRoom: bot.instantRoom } : local;
-  const status = bot?.recall ? "recall" : bot && !bot.gate.ok ? "blocked" : drawStatus(ledger.vault);
   const vault = ledger.vault;
-  const statusLabel =
-    status === "open" ? "Draws open" : status === "blocked" ? "Draws blocked" : "Recall open";
   const previewGates = [
     {
       label: "Bond coverage",
@@ -90,17 +86,10 @@ export function HealthScreen() {
           <h1 className="font-serif text-4xl tracking-tight">Vault health</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
             {bot
-              ? "These readings come from the simulated escrow the bot draws from. It enforces the same eight draw-gate conditions as the on-chain design, with the time limits scaled to the test epoch."
+              ? "These readings come from the simulated escrow the bot draws from. It enforces the same eight draw-gate conditions as the on-chain design, with the time limits scaled to the epoch length."
               : "These readings follow the draw-gate rules. They are computed in the preview until attestors sign a NAV report on-chain."}
           </p>
         </div>
-        <p
-          className={`rounded-full border px-3 py-1 font-mono text-xs tracking-[0.14em] uppercase ${
-            status === "open" ? "border-sage/40 text-sage" : "border-danger/40 text-danger"
-          }`}
-        >
-          {statusLabel}
-        </p>
       </div>
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -152,7 +141,7 @@ export function HealthScreen() {
           </dl>
           <p className="mt-4 text-sm leading-6 text-faint">
             {bot
-              ? "In test mode the bot reads its own paper account and posts NAV itself. The design has three independent attestors and a 2 of 3 quorum."
+              ? "The bot reads its own paper account and posts NAV itself. The design has three independent attestors and a 2 of 3 quorum."
               : "A positions hash will show here when attestors post the report. The quorum in the design is 2 of 3."}
           </p>
         </div>
@@ -164,7 +153,7 @@ export function HealthScreen() {
         </h2>
         <p className="mt-2 text-sm leading-6 text-muted">
           {bot
-            ? `Each row is one ${bot.epochSeconds}-second test epoch, standing in for a day: the rebate payout, then spread marked to mid, on 1,000 shares.`
+            ? `Each row is one ${bot.epochSeconds}-second epoch, standing in for a day: the rebate payout, then spread marked to mid, on 1,000 shares.`
             : "Each row is that day's share-price change on 1,000 shares, split the same way as personal yield."}
         </p>
         {bot && book.length === 0 && (

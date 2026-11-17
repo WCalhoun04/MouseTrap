@@ -109,7 +109,7 @@ export function VaultScreen() {
           <p className="mt-4 text-sm leading-6 text-faint">
             {bot
               ? "Split in the proportions the vault booked from the bot's fills: rebates paid, and spread marked to mid. Liquidity rewards cannot be earned on paper, so they show as zero."
-              : "Positive yield is booked 78% rebates, 27% liquidity rewards, and a 5% spread drag. A loss is booked entirely as spread. Start the bot in test mode to see books from its fill log."}
+              : "Positive yield is booked 78% rebates, 27% liquidity rewards, and a 5% spread drag. A loss is booked entirely as spread. Start the bot to see books from its fill log."}
           </p>
         )}
       </section>
@@ -183,7 +183,7 @@ function TradePanel() {
         <div>
           <h2 className="font-serif text-2xl">Open a position</h2>
           <p className="mt-2 text-sm leading-6 text-muted">
-            Connect Phantom or Solflare on Devnet, or use a preview wallet to try deposit,
+            Connect Phantom or Solflare, or use a preview wallet to try deposit,
             yield, and withdraw in this browser.
           </p>
         </div>
@@ -262,7 +262,6 @@ function DepositForm() {
   const { walletId } = useIdentity();
   const ledgerApi = useLedger();
   const [amount, setAmount] = useState("");
-  const [checked, setChecked] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -281,7 +280,7 @@ function DepositForm() {
       setNotice(null);
       return;
     }
-    const result = await ledgerApi.deposit(walletId, usdc, checked || user.acceptedRisk);
+    const result = await ledgerApi.deposit(walletId, usdc, true);
     if (!result.ok) {
       setError(result.error);
       setNotice(null);
@@ -312,26 +311,6 @@ function DepositForm() {
           ? `You receive ${formatShares(shares)} at ${formatUsd(price, 4)} per share.`
           : `Share price ${formatUsd(price, 4)}.`}
       </p>
-      {!user.acceptedRisk && (
-        <div className="rounded-xl border border-line bg-ink p-4">
-          <p className="text-sm font-medium text-paper">Before you deposit</p>
-          <ul className="mt-2 list-disc space-y-1 pl-4 text-sm leading-6 text-muted">
-            <li>This deposit stays in the preview ledger. A live deposit sends USDC into escrow.</li>
-            <li>Drawn funds sit on the operator&apos;s Gemini account. Contracts can settle at $0 or $1.</li>
-            <li>The operator bond takes losses first. It is not insurance.</li>
-            <li>A withdrawal above the idle buffer waits for the operator to repay.</li>
-          </ul>
-          <label className="mt-3 flex items-start gap-3 text-sm leading-6 text-paper">
-            <input
-              type="checkbox"
-              checked={checked}
-              onChange={(event) => setChecked(event.target.checked)}
-              className="mt-1 accent-[#e4b15c]"
-            />
-            <span>I understand a live vault can lose money, and that this deposit stays in the preview.</span>
-          </label>
-        </div>
-      )}
       {error && (
         <p role="alert" className="text-sm text-danger">
           {error}
@@ -472,7 +451,7 @@ function WithdrawForm() {
       {queued && (
         <p className="text-xs leading-5 text-faint">
           {fromBot
-            ? "A queued claim pays once the bot has returned enough USDC. The deadline is 48 hours in the design and ten epochs in test mode."
+            ? "A queued claim pays once the bot has returned enough USDC. The deadline is 48 hours in the design and ten epochs here."
             : "Recall claims pay immediately in this preview. On the live vault they wait for the operator to return USDC, with a 48-hour deadline in the design."}
         </p>
       )}

@@ -24,7 +24,7 @@ The protocol has three parts: the **on-chain escrow** (Solana program), the **cl
 
 | Decision | Recommendation | Why |
 | --- | --- | --- |
-| Deposit asset | USDC; optionally a SOL-to-USDC swap at deposit | Gemini Predictions settles and pays rebates in USD, and Gemini accepts USDC on Solana. SOL deposits would add price risk and a conversion leg on every draw and repay |
+| Deposit asset | USDC on Solana only | Gemini Predictions settles and pays rebates in USD, and Gemini accepts USDC on Solana, so there is no swap leg and no SOL price risk |
 | Vault model | Copy Morpho Vault V2's roles: owner, curator, allocator (the operator), sentinel, with timelocks | A proven split where the curator cannot hurt depositors without a timelock and a sentinel can de-risk at once |
 | Where funds can go | One Gemini deposit address stored in config; changing it is timelocked | The operator can never redirect a draw to its own wallet |
 | How stakers are protected | Operator first-loss bond, draw caps, idle buffer, attested NAV, circuit breakers | See section 5 |
@@ -176,40 +176,40 @@ One Anchor program holds deposits, issues vault shares (mvUSDC), and releases US
 
 ## 5. Trust and assurance conditions
 
-A draw succeeds only if all on-chain checks pass in the same transaction; the Gemini-side and legal controls cover what the chain cannot see. Numbers below are starting values to tune in Phase 1, not tested limits.
+A draw succeeds only if all on-chain checks pass in the same transaction. For the hackathon, the trust model is limited to what the vault program can enforce by itself plus a single attestor key. Anything that needs independent parties, Gemini account configuration or a legal agreement is deferred and listed at the end of this section. Where sections 3, 4 and 7 describe a deferred item, this section wins for the hackathon build. Numbers below are starting values, not tested limits.
 
-### Checked on-chain at every draw
+### In scope: checked on-chain at every draw
 
 | # | Condition | Proposed default |
 | --- | --- | --- |
 | 1 | Bond coverage: operator bond ≥ a share of outstanding + requested principal | 15% |
-| 2 | Absolute cap on outstanding principal | Set per phase; low at launch |
+| 2 | Absolute cap on outstanding principal | Low, fixed at initialisation |
 | 3 | Relative cap: outstanding ≤ a share of NAV | 60% |
 | 4 | Idle buffer after the draw ≥ max(buffer %, queued withdrawals) | 20% of NAV |
-| 5 | Fresh NAV: last report signed by the attestor quorum and recent | 2-of-3, under 1 hour old |
+| 5 | Fresh NAV: last report signed by the attestor key and recent | Single attestor, under 1 hour old |
 | 6 | Health: attested Gemini equity ≥ outstanding principal × threshold | 0.97 |
-| 7 | Destination is the stored Gemini deposit address; changes timelocked | 7-day timelock |
+| 7 | Destination is the Gemini deposit address stored at initialisation | Fixed; no instruction changes it |
 | 8 | Not paused, no open recall, draw size ≤ per-draw limit | Per-draw limit 25% of cap |
 
-### Circuit breakers (on-chain, triggered by NAV reports)
+### In scope: circuit breakers (on-chain, triggered by NAV reports)
 
-- Equity below 95% of outstanding: new draws blocked, sentinel alerted
+- Equity below 95% of outstanding: new draws blocked
 - Equity below 90%: automatic full recall; bond slashed to cover the gap
 - No NAV report for 24 hours: draws blocked, recall opens
-- Missed recall deadline: bond slashed in full, operator role revocable by the curator
+- Missed recall deadline: bond slashed in full
 
-### Gemini-side controls (attested, not enforced by the chain)
+### In scope: roles
 
-- Withdrawal address allowlist on the Gemini account containing only the vault's USDC address, so a stolen trading key cannot move funds elsewhere
-- The bot's API key can trade but not withdraw; attestors get read-only keys (confirm Predictions honours Gemini's role-scoped keys)
-- Risk limits the bot must stay inside, checked against each positions snapshot: per-contract and per-event exposure, allowed categories, net inventory
-- Daily sweep: after the 5pm ET payout, cash above principal plus a working float goes back to the vault
+- Owner, operator and sentinel are single keys set at initialisation, not multisigs
+- The sentinel can pause draws and force a recall
+- Config is immutable after initialisation, so there is no `propose_config` / `accept_config`, timelock or veto to build
 
-### Legal and operational controls
+### Deferred until after the hackathon
 
-- Operator agreement (or a special-purpose entity holding the Gemini account) that makes the vault the beneficial owner of drawn funds
-- Attestors run by parties independent of the operator; zkTLS proofs of Gemini API responses replace signatures once feasible
-- Quarterly recall drill: recall everything, measure time to repay
+- **Independent attestation:** a 2-of-3 quorum of attestors independent of the operator, then zkTLS proofs of Gemini API responses. Until then the NAV is only as honest as the one attestor key, which the operator runs
+- **Timelocked governance:** curator multisig, timelocked changes to caps, address and attestors (7-day timelock on the address), sentinel veto, curator revoking the operator role
+- **Gemini-side controls:** withdrawal address allowlist containing only the vault's USDC address; a bot API key that can trade but not withdraw; read-only attestor keys; bot risk limits checked against each positions snapshot; daily sweep of cash above principal plus a working float
+- **Legal and operational controls:** operator agreement or special-purpose entity making the vault the beneficial owner of drawn funds; quarterly recall drill
 
 ---
 
@@ -250,7 +250,7 @@ The app's main job is to make the off-chain leg auditable: every staker should s
 
 | View | For | Shows and does |
 | --- | --- | --- |
-| Vault | Stakers | Connect wallet, deposit USDC (optional SOL swap), request and claim withdrawals, queue position, share price history, return split into rebates, rewards and spread |
+| Vault | Stakers | Connect wallet, deposit USDC, request and claim withdrawals, queue position, share price history, return split into rebates, rewards and spread |
 | Health | Everyone | Outstanding principal vs bond vs NAV, idle buffer, breaker status, last NAV report with its signatures or proofs, daily rebate payouts |
 | Operator | Operator | Draw and repay requests, gate check preview (which condition would fail), recall deadlines, risk-limit usage |
 | Governance | Curator, sentinel | Pending timelocked changes, veto, pause, force recall |

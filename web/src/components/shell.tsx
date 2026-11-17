@@ -5,8 +5,7 @@ import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { useIdentity, useLedger } from "@/components/providers";
-import { sourceLabel } from "@/lib/bot-api";
+import { useIdentity } from "@/components/providers";
 import { formatWallet } from "@/lib/format";
 
 export function Shell({ children }: { children: ReactNode }) {
@@ -14,7 +13,6 @@ export function Shell({ children }: { children: ReactNode }) {
     <div className="flex min-h-full flex-col">
       <div className="h-1 bg-brass" />
       <Header />
-      <PreviewBanner />
       <main className="flex-1">{children}</main>
       <footer className="mx-auto w-full max-w-6xl px-4 py-10 text-sm leading-6 text-faint sm:px-6">
         <p>
@@ -52,9 +50,6 @@ function Header() {
           </NavLink>
         </nav>
         <div className="ml-auto flex items-center gap-2 sm:gap-3">
-          <span className="hidden font-mono text-[11px] tracking-[0.16em] text-faint uppercase sm:inline">
-            Devnet preview
-          </span>
           <WalletControl />
         </div>
       </div>
@@ -116,7 +111,7 @@ function WalletControl() {
         <div className="text-right">
           <p className="font-mono text-sm text-paper">{formatWallet(walletId)}</p>
           {sol !== null && (
-            <p className="font-mono text-[11px] text-faint">{sol.toFixed(3)} SOL devnet</p>
+            <p className="font-mono text-[11px] text-faint">{sol.toFixed(3)} SOL</p>
           )}
         </div>
         <button
@@ -157,52 +152,6 @@ function WalletControl() {
       >
         {connecting ? "Connecting…" : "Connect wallet"}
       </button>
-    </div>
-  );
-}
-
-function PreviewBanner() {
-  const ledger = useLedger();
-  const [armed, setArmed] = useState(false);
-
-  return (
-    <div className="border-b border-line">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
-        {ledger.ready && ledger.bot ? (
-          <p className="max-w-3xl text-sm leading-6 text-muted">
-            <span className="text-brass">{sourceLabel(ledger.bot)}.</span> The market maker bot
-            is running against a simulated escrow. Deposits fund its draws with test USDC. No
-            real orders or tokens move.
-          </p>
-        ) : (
-          <p className="max-w-3xl text-sm leading-6 text-muted">
-            Preview ledger. A wallet names your position. Deposits and withdrawals move
-            preview USDC stored in this browser. Wallet tokens stay put until the escrow
-            program is deployed.
-          </p>
-        )}
-        {ledger.ready &&
-          (armed ? (
-            <button
-              type="button"
-              onClick={() => {
-                void ledger.reset();
-                setArmed(false);
-              }}
-              className="rounded-full border border-danger/40 px-3 py-1.5 text-sm text-danger"
-            >
-              Confirm reset
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setArmed(true)}
-              className="rounded-full border border-line px-3 py-1.5 text-sm text-muted hover:text-paper"
-            >
-              {ledger.bot ? "Reset test data" : "Reset preview data"}
-            </button>
-          ))}
-      </div>
     </div>
   );
 }

@@ -3,11 +3,9 @@
 import { useEffect, useState } from "react";
 import { useLedger } from "@/components/providers";
 import {
-  botActions,
   BOT_URL,
   fetchBot,
   sourceLabel,
-  type ActionResult,
   type BotStatus,
   type Usage,
 } from "@/lib/bot-api";
@@ -50,7 +48,6 @@ function useBotStatus(): { status: BotStatus | null; loaded: boolean } {
 export function OperatorScreen() {
   const { status, loaded } = useBotStatus();
   const ledgerApi = useLedger();
-  const [message, setMessage] = useState<string | null>(null);
 
   if (!loaded) {
     return <p className="px-4 py-16 text-sm text-muted sm:px-6">Looking for the bot…</p>;
@@ -63,9 +60,9 @@ export function OperatorScreen() {
         <div className="mt-4 rounded-2xl border border-line bg-sheet p-5 sm:p-6">
           <h2 className="font-serif text-2xl">The bot is not running</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-            This view shows the market maker&apos;s quotes, fills and draws. Start the bot in
-            test mode and this page fills in within a few seconds. Test mode trades fake funds
-            against live Gemini order books.
+            This view shows the market maker&apos;s quotes, fills and draws. Start the bot
+            and this page fills in within a few seconds. It trades simulated funds against live
+            Gemini order books.
           </p>
           <pre className="mt-4 overflow-x-auto rounded-xl border border-line bg-ink p-4 font-mono text-sm text-paper">
             cd bot{"\n"}npm install{"\n"}npm run test-mode
@@ -82,17 +79,6 @@ export function OperatorScreen() {
 
   const bot = ledgerApi.ready ? ledgerApi.bot : null;
   const vault = ledgerApi.ready ? ledgerApi.ledger.vault : null;
-  const run = async (action: Promise<ActionResult>, done: string) => {
-    const result = await action;
-    setMessage(result.ok ? done : result.error);
-  };
-
-  const modeLabel =
-    status.quoteMode === "normal"
-      ? "Quoting"
-      : status.quoteMode === "reduce-only"
-        ? "Reduce only"
-        : "Quotes pulled";
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-6 sm:px-6 sm:py-8">
@@ -105,13 +91,6 @@ export function OperatorScreen() {
             {status.killReason ? ` ${status.killReason}.` : ""}
           </p>
         </div>
-        <p
-          className={`rounded-full border px-3 py-1 font-mono text-xs tracking-[0.14em] uppercase ${
-            status.quoteMode === "normal" ? "border-sage/40 text-sage" : "border-danger/40 text-danger"
-          }`}
-        >
-          {modeLabel}
-        </p>
       </div>
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -280,68 +259,25 @@ export function OperatorScreen() {
         </section>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-5">
-        <section className="rounded-2xl border border-line bg-sheet p-5 sm:p-6 lg:col-span-2">
-          <h2 className="font-mono text-[11px] tracking-[0.16em] text-faint uppercase">
-            Test controls
-          </h2>
-          <p className="mt-2 text-sm leading-6 text-muted">
-            These stand in for the sentinel and the operator&apos;s kill switch. They exist only
-            in test mode.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Control
-              onClick={() => run(botActions.recall(), "Recall opened. The bot is repaying.")}
-              danger
-            >
-              Force recall
-            </Control>
-            {vault?.paused ? (
-              <Control onClick={() => run(botActions.resume(), "Draws resumed.")}>
-                Resume draws
-              </Control>
-            ) : (
-              <Control onClick={() => run(botActions.pause(), "Draws paused.")} danger>
-                Pause draws
-              </Control>
-            )}
-            {status.manualStop ? (
-              <Control onClick={() => run(botActions.startQuoting(), "Quoting resumed.")}>
-                Resume quoting
-              </Control>
-            ) : (
-              <Control onClick={() => run(botActions.stopQuoting(), "All quotes cancelled.")} danger>
-                Cancel all quotes
-              </Control>
-            )}
-          </div>
-          {message && (
-            <p role="status" className="mt-3 text-sm text-muted">
-              {message}
-            </p>
-          )}
-        </section>
-
-        <section className="rounded-2xl border border-line bg-sheet p-5 sm:p-6 lg:col-span-3">
-          <h2 className="font-mono text-[11px] tracking-[0.16em] text-faint uppercase">
-            Relayer and bot log
-          </h2>
-          {status.log.length === 0 ? (
-            <p className="mt-3 text-sm text-muted">Nothing logged yet.</p>
-          ) : (
-            <ul className="mt-2 divide-y divide-line">
-              {status.log.slice(0, 10).map((entry, index) => (
-                <li key={`${entry.at}-${index}`} className="flex items-baseline gap-3 py-2">
-                  <span className="shrink-0 font-mono text-xs text-faint">
-                    {formatClock(entry.at)}
-                  </span>
-                  <span className="text-sm">{entry.text}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      </div>
+      <section className="rounded-2xl border border-line bg-sheet p-5 sm:p-6">
+        <h2 className="font-mono text-[11px] tracking-[0.16em] text-faint uppercase">
+          Relayer and bot log
+        </h2>
+        {status.log.length === 0 ? (
+          <p className="mt-3 text-sm text-muted">Nothing logged yet.</p>
+        ) : (
+          <ul className="mt-2 divide-y divide-line">
+            {status.log.slice(0, 10).map((entry, index) => (
+              <li key={`${entry.at}-${index}`} className="flex items-baseline gap-3 py-2">
+                <span className="shrink-0 font-mono text-xs text-faint">
+                  {formatClock(entry.at)}
+                </span>
+                <span className="text-sm">{entry.text}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }
@@ -397,29 +333,5 @@ function Meter({ label, usage }: { label: string; usage: Usage }) {
         />
       </div>
     </li>
-  );
-}
-
-function Control({
-  onClick,
-  danger,
-  children,
-}: {
-  onClick: () => void;
-  danger?: boolean;
-  children: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-full border px-4 py-2 text-sm ${
-        danger
-          ? "border-danger/40 text-danger hover:bg-danger/10"
-          : "border-line text-paper hover:bg-sheet-2"
-      }`}
-    >
-      {children}
-    </button>
   );
 }
