@@ -59,7 +59,7 @@ async function buildVault(cfg: Config): Promise<{ vault: VaultClient & ServedVau
     // Test mode owns the test USDC mint, so it can mint to stand in for paper profit.
     mintAuthority: cfg.mode === "test" ? loadKey("owner") : undefined,
   });
-  log(`Escrow program ${info.programId} on ${cfg.rpcUrl}.`);
+  log(`Escrow program ${info.programId} on ${new URL(cfg.rpcUrl).host}.`);
   return { vault: chain, crank: chain };
 }
 
